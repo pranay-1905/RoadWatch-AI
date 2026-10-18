@@ -1,0 +1,31 @@
+/* ==========================================================================
+   ROADWATCH AI - MODULAR STYLESHEET SYSTEM
+   Cleanly partitioned into individual modular stylesheets.
+   ========================================================================== */
+
+/* 1. Core design tokens, typography, layout & main dashboard */
+@import './layout.css';
+
+/* 2. Authentication & portal selector cards */
+@import './auth.css';
+
+/* 3. Contractor & Vendor execution workspace */
+@import './vendor.css';
+
+/* 4. Inspection, bidding & telemetry HUD modals */
+@import './modal.css';
+
+/* 5. Municipal contractor & vendor master management */
+@import './vendorMaster.css';
+
+/* 6. Citizen public grievance reporting portal */
+@import './citizen.css';
+
+/* 7. Operations Center: SLA tracker, vendor scorecards & offline queue */
+@import './operations.css';
+
+/* 8. Mobile & tablet responsive breakpoint adaptations */
+@import './responsive.css';
+
+/* 9. Official municipal print audit dossier & letterhead */
+@import './print.css';
