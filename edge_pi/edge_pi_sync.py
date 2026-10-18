@@ -1,9 +1,10 @@
 """
 RoadWatch AI - Raspberry Pi 3B+ Edge Database & Cloud Sync Service
 Runs on Raspberry Pi OS. 
-- Records detections into local SQLite (offline).
-- Automatically checks for Wi-Fi/Internet connectivity.
-- Uploads pending detections & photos to Supabase Cloud PostgreSQL.
+- Records detections into local SQLite Queue (offline fault tolerance).
+- Checks for Wi-Fi / Internet connectivity every 15 seconds.
+- Automatically flushes and uploads pending detections & defect photos to 
+  API Gateway (POST /api/potholes/sync) on Render, which saves to Supabase Cloud.
 """
 
 import os
@@ -11,16 +12,20 @@ import time
 import socket
 import sqlite3
 import requests
+import json
 
 # ---------------------------------------------------------------------------
-# CONFIGURATION
+# CONFIGURATION (Per System Block Diagram)
 # ---------------------------------------------------------------------------
 SQLITE_DB_PATH = "/home/pi/roadwatch/potholes.db"
 LOCAL_IMAGES_DIR = "/home/pi/roadwatch/images"
 
-# Fill these from your Supabase Dashboard -> Settings -> API
-SUPABASE_URL = "https://your-project.supabase.co"
-SUPABASE_KEY = "your-anon-or-service-role-key"
+# API Gateway on Render (Primary route per Block Diagram module 2)
+API_GATEWAY_URL = os.environ.get("API_GATEWAY_URL", "https://roadwatch-ai-15g9.onrender.com/api/potholes/sync")
+
+# Direct Supabase Fallback (if API Gateway is unreachable)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://yifwluotgmnuhyfwwdki.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 
 os.makedirs(LOCAL_IMAGES_DIR, exist_ok=True)
 
@@ -39,6 +44,9 @@ def init_local_db():
             lng REAL,
             severity TEXT,
             depth_cm REAL,
+            confidence REAL DEFAULT 0.88,
+            peak_dev_g REAL DEFAULT 2.4,
+            speed_kmh REAL DEFAULT 35.0,
             local_image_path TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             synced INTEGER DEFAULT 0
@@ -51,77 +59,54 @@ def init_local_db():
 # ---------------------------------------------------------------------------
 # 2. SAVE DETECTED POTHOLE LOCALLY WHILE OFFLINE
 # ---------------------------------------------------------------------------
-def record_pothole_offline(pothole_id, road_name, ward, lat, lng, severity, depth_cm, image_path):
+def record_pothole_offline(pothole_id, road_name, ward, lat, lng, severity, depth_cm, image_path, confidence=0.88, shock_g=2.4, speed=35.0):
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT OR REPLACE INTO local_potholes 
-        (id, road_name, ward, lat, lng, severity, depth_cm, local_image_path, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
-    """, (pothole_id, road_name, ward, lat, lng, severity, depth_cm, image_path))
+        (id, road_name, ward, lat, lng, severity, depth_cm, confidence, peak_dev_g, speed_kmh, local_image_path, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    """, (pothole_id, road_name, ward, lat, lng, severity, depth_cm, confidence, shock_g, speed, image_path))
     conn.commit()
     conn.close()
-    print(f"[OFFLINE SAVED] Pothole {pothole_id} stored in SQLite. (Pending sync)")
+    print(f"[OFFLINE SAVED] Pothole {pothole_id} buffered in SQLite queue. (Pending sync)")
 
 # ---------------------------------------------------------------------------
 # 3. INTERNET CONNECTIVITY CHECK
 # ---------------------------------------------------------------------------
 def is_online():
     try:
-        # Check connection to Google DNS or Supabase host
+        # Check connection to 8.8.8.8 or Render host
         socket.create_connection(("8.8.8.8", 53), timeout=3)
         return True
     except OSError:
         return False
 
 # ---------------------------------------------------------------------------
-# 4. SYNC PENDING RECORDS TO SUPABASE CLOUD
+# 4. SYNC PENDING RECORDS TO API GATEWAY (POST /api/potholes/sync)
 # ---------------------------------------------------------------------------
-def sync_to_supabase():
+def sync_to_cloud():
     if not is_online():
-        print("[SYNC] Vehicle offline. Waiting for Wi-Fi connection...")
+        print("[SYNC] Vehicle offline. Buffering in local SQLite queue...")
         return
 
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, road_name, ward, lat, lng, severity, depth_cm, local_image_path FROM local_potholes WHERE synced = 0")
+    cursor.execute("""
+        SELECT id, road_name, ward, lat, lng, severity, depth_cm, confidence, peak_dev_g, speed_kmh, local_image_path 
+        FROM local_potholes WHERE synced = 0
+    """)
     pending = cursor.fetchall()
 
     if not pending:
-        print("[SYNC] All local potholes are already synced.")
         conn.close()
         return
 
-    print(f"[SYNC] Online! Found {len(pending)} pending potholes to upload.")
-
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
-    }
+    print(f"[SYNC] Wi-Fi Online! Uploading {len(pending)} pending potholes to API Gateway...")
 
     for row in pending:
-        p_id, road_name, ward, lat, lng, severity, depth, img_path = row
-        image_url = None
+        p_id, road_name, ward, lat, lng, severity, depth, conf, shock_g, speed, img_path = row
 
-        # A) Upload image to Supabase Storage if file exists
-        if img_path and os.path.exists(img_path):
-            file_name = os.path.basename(img_path)
-            upload_url = f"{SUPABASE_URL}/storage/v1/object/pothole-photos/edge/{file_name}"
-            try:
-                with open(img_path, 'rb') as f:
-                    upload_res = requests.post(
-                        upload_url,
-                        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
-                        data=f
-                    )
-                if upload_res.status_code in [200, 201]:
-                    image_url = f"{SUPABASE_URL}/storage/v1/object/public/pothole-photos/edge/{file_name}"
-            except Exception as e:
-                print(f"[IMAGE UPLOAD ERROR] {e}")
-
-        # B) Insert row into Supabase 'potholes' table
         payload = {
             "id": p_id,
             "road_name": road_name,
@@ -130,32 +115,67 @@ def sync_to_supabase():
             "lng": lng,
             "severity": severity,
             "depth_cm": depth,
-            "status": "OPEN",
-            "image_url": image_url
+            "confidence": conf,
+            "peak_dev_g": shock_g,
+            "speed_kmh": speed,
+            "source": "edge_pi"
         }
 
+        success = False
+
+        # Method 1: Upload via Hosted Node.js API Gateway (Block Diagram Module 2)
         try:
-            res = requests.post(f"{SUPABASE_URL}/rest/v1/potholes", json=payload, headers=headers)
+            files = {}
+            if img_path and os.path.exists(img_path):
+                files['photo'] = (os.path.basename(img_path), open(img_path, 'rb'), 'image/jpeg')
+
+            data = {'data': json.dumps(payload)}
+            res = requests.post(API_GATEWAY_URL, data=data, files=files if files else None, timeout=12)
+
+            if files and 'photo' in files:
+                files['photo'][1].close()
+
             if res.status_code in [200, 201]:
                 cursor.execute("UPDATE local_potholes SET synced = 1 WHERE id = ?", (p_id,))
                 conn.commit()
-                print(f"[SYNC SUCCESS] Pothole {p_id} synced to cloud Supabase!")
+                print(f"[SYNC SUCCESS] Pothole {p_id} uploaded via API Gateway -> Supabase!")
+                success = True
             else:
-                print(f"[SYNC FAILED] Status {res.status_code}: {res.text}")
+                print(f"[SYNC GATEWAY WARNING] Status {res.status_code}: {res.text[:100]}")
         except Exception as e:
-            print(f"[SYNC NETWORK ERROR] {e}")
+            print(f"[SYNC GATEWAY ERROR] {e}")
+
+        # Method 2: Fallback direct to Supabase if Gateway is temporarily down
+        if not success and SUPABASE_KEY:
+            try:
+                headers = {
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                    "Content-Type": "application/json"
+                }
+                res = requests.post(f"{SUPABASE_URL}/rest/v1/potholes", json=payload, headers=headers, timeout=8)
+                if res.status_code in [200, 201]:
+                    cursor.execute("UPDATE local_potholes SET synced = 1 WHERE id = ?", (p_id,))
+                    conn.commit()
+                    print(f"[SYNC FALLBACK] Pothole {p_id} saved directly to Supabase.")
+            except Exception as e:
+                print(f"[SYNC FALLBACK ERROR] {e}")
 
     conn.close()
 
 # ---------------------------------------------------------------------------
-# MAIN LOOP
+# MAIN DAEMON LOOP
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
     init_local_db()
-    print("[ROADWATCH] Edge Sync Daemon started. Running sync check every 15 seconds...")
+    print("=================================================================")
+    print(" 🛣️ RoadWatch AI — Edge Sync Daemon (Raspberry Pi 3B+)")
+    print(f" Target Gateway: {API_GATEWAY_URL}")
+    print(" Running Wi-Fi sync check every 15 seconds...")
+    print("=================================================================")
     while True:
         try:
-            sync_to_supabase()
+            sync_to_cloud()
         except Exception as err:
-            print(f"[LOOP ERROR] {err}")
+            print(f"[DAEMON LOOP ERROR] {err}")
         time.sleep(15)
