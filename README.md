@@ -30,7 +30,7 @@ RoadWatch AI implements a **Dual-Tier Edge Hardware Architecture** combining an 
 | :--- | :--- |
 | **Project Title** | RoadWatch AI: Automated Pothole Detection, Real-Time Edge Telemetry & Municipal Tendering Platform |
 | **Domain** | IoT, Embedded Systems, Computer Vision, Cloud Computing & Web Platforms |
-| **Target Authority** | Nagpur Municipal Corporation (NMC) — PWD Zone 4 Dharampeth |
+| **Target Authority** | Nagpur Municipal Corporation (NMC) — PWD |
 | **Standards Compliance** | Indian Road Congress (IRC:SP:98-2020) Pavement Norms |
 | **Edge Hardware Stack** | STM32F411CEU6 Black Pill (ARM Cortex-M4 @ 100MHz) + Raspberry Pi 3B+ |
 | **Cloud & Web Stack** | React 19, Node.js Express, Supabase PostgreSQL, Vercel, Render |
@@ -203,19 +203,6 @@ The system is organized into **5 core functional modules**:
 
 ---
 
-### 💡 Why Dual-Tier (STM32 + Raspberry Pi)? — Engineering Viva Justification
-During final year engineering project evaluations, examiners frequently probe the rationale behind using both an STM32 microcontroller and a Raspberry Pi. The technical reasons are:
-
-1. **Deterministic Real-Time Sampling (Zero OS Jitter):**
-   - The **STM32 ARM Cortex-M4** runs bare-metal firmware with deterministic microsecond interrupt handling. Mechanical pothole shocks produce transient acceleration spikes lasting only 10ms–30ms. An embedded RTOS / bare-metal micro runs at a fixed 100Hz–200Hz loop without the multi-tasking kernel scheduling jitter (~10ms–50ms) inherent in Linux (Raspberry Pi OS).
-2. **Dedicated Peripheral Offloading:**
-   - The STM32 continuously handles high-throughput I2C reading from the MPU-6050 and non-blocking UART parsing of NEO-6M NMEA sentences ($GPRMC / $GPGGA) without consuming CPU cycles or memory bandwidth on the Raspberry Pi.
-3. **Decoupled Edge Vision & Networking:**
-   - The **Raspberry Pi 3B+** dedicates its Quad-Core 1.4GHz processor to running the camera capture pipeline (`libcamera`), managing local SQLite offline caching, and orchestrating encrypted TLS HTTP/REST batch syncs to the cloud backend.
-4. **Hardware Safety & Direct 3.3V Logic:**
-   - Both the STM32 Black Pill and Raspberry Pi 3B+ operate on 3.3V logic levels, allowing direct connection across USART and GPIO interrupt lines without requiring bi-directional logic level converter chips.
-
----
 
 ## 📁 Repository Structure
 
@@ -371,7 +358,7 @@ RoadWatch AI adheres to standard municipal specifications:
 ## 👨‍💻 Author & Project Credits
 
 **Pranay Chikankar**  
-*Final Year Engineering Student (B.E. / B.Tech)*  
+*Final Year Engineering Student (B.Tech)*  
 - GitHub: [@pranay-1905](https://github.com/pranay-1905)
 - Project Repository: [RoadWatch-AI](https://github.com/pranay-1905/RoadWatch-AI)
 
