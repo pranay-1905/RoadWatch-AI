@@ -2,6 +2,34 @@ import { supabase } from '../config/db.js';
 import { uploadToSupabaseStorage } from '../config/multer.js';
 
 /**
+ * Helper: Automated Reverse Geocoding (Converts lat, lng to real road & ward name via OpenStreetMap)
+ */
+const reverseGeocode = async (lat, lng) => {
+  try {
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'RoadWatch-AI/1.0 (Municipal Pothole Detection System; contact@roadwatch.nmc)'
+      },
+      signal: AbortSignal.timeout(2500) // 2.5s timeout so edge sync is never blocked
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data || !data.address) return null;
+
+    const road = data.address.road || data.address.pedestrian || data.address.suburb || data.address.neighbourhood || 'Surveyed Road Corridor';
+    const ward = data.address.suburb || data.address.residential || data.address.city_district || data.address.city || 'Central Zone';
+    return {
+      roadName: `${road}, near ${ward}`,
+      ward
+    };
+  } catch {
+    return null;
+  }
+};
+
+/**
  * 1. SYNC EDGE BATCH (Called by Raspberry Pi 3B+ when connecting to Wi-Fi)
  */
 export const syncEdgeBatch = async (req, res, next) => {
@@ -27,29 +55,47 @@ export const syncEdgeBatch = async (req, res, next) => {
       }
     }
 
-    // Sanitize and format records for Supabase
-    const sanitized = potholesToInsert.map(item => ({
-      id: item.id || `NMC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      road_name: item.road_name || 'Nagpur Arterial Road',
-      ward: item.ward || 'Central Zone',
-      lat: parseFloat(item.lat),
-      lng: parseFloat(item.lng),
-      severity: (item.severity || 'MEDIUM').toUpperCase(),
-      depth_cm: parseFloat(item.depth_cm || 5.0),
-      status: item.status || 'OPEN',
-      image_url: item.image_url || null,
-      sla_hours: item.severity === 'CRITICAL' ? 24 : item.severity === 'HIGH' ? 48 : 72,
-      source: item.source || 'edge_pi',
-      detected_at: item.detected_at || new Date().toISOString(),
-      confidence: item.confidence !== undefined ? parseFloat(item.confidence) : null,
-      peak_dev_g: item.peak_dev_g !== undefined ? parseFloat(item.peak_dev_g) : (item.imuGForce ? parseFloat(item.imuGForce) : null),
-      ax_mg: item.ax_mg !== undefined ? parseInt(item.ax_mg, 10) : null,
-      ay_mg: item.ay_mg !== undefined ? parseInt(item.ay_mg, 10) : null,
-      az_mg: item.az_mg !== undefined ? parseInt(item.az_mg, 10) : null,
-      gx_dps: item.gx_dps !== undefined ? parseFloat(item.gx_dps) : null,
-      gy_dps: item.gy_dps !== undefined ? parseFloat(item.gy_dps) : null,
-      gz_dps: item.gz_dps !== undefined ? parseFloat(item.gz_dps) : null,
-      speed_kmh: item.speed_kmh !== undefined ? parseFloat(item.speed_kmh) : (item.speedKmh ? parseFloat(item.speedKmh) : null)
+    // Resolve real road names from GPS coordinates (Reverse Geocoding)
+    const sanitized = await Promise.all(potholesToInsert.map(async (item) => {
+      const lat = parseFloat(item.lat);
+      const lng = parseFloat(item.lng);
+      let road_name = item.road_name;
+      let ward = item.ward;
+
+      // If road_name is generic or empty, convert lat/lng to real street address
+      if (!road_name || road_name === 'Nagpur Arterial Road' || road_name === 'West High Court Road') {
+        const geo = await reverseGeocode(lat, lng);
+        if (geo) {
+          road_name = geo.roadName;
+          ward = geo.ward || ward;
+        } else {
+          road_name = `Surveyed Road Corridor (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+        }
+      }
+
+      return {
+        id: item.id || `NMC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        road_name: road_name || 'Nagpur Arterial Road',
+        ward: ward || 'Central Zone',
+        lat,
+        lng,
+        severity: (item.severity || 'MEDIUM').toUpperCase(),
+        depth_cm: parseFloat(item.depth_cm || 5.0),
+        status: item.status || 'OPEN',
+        image_url: item.image_url || null,
+        sla_hours: item.severity === 'CRITICAL' ? 24 : item.severity === 'HIGH' ? 48 : 72,
+        source: item.source || 'edge_pi',
+        detected_at: item.detected_at || new Date().toISOString(),
+        confidence: item.confidence !== undefined ? parseFloat(item.confidence) : null,
+        peak_dev_g: item.peak_dev_g !== undefined ? parseFloat(item.peak_dev_g) : (item.imuGForce ? parseFloat(item.imuGForce) : null),
+        ax_mg: item.ax_mg !== undefined ? parseInt(item.ax_mg, 10) : null,
+        ay_mg: item.ay_mg !== undefined ? parseInt(item.ay_mg, 10) : null,
+        az_mg: item.az_mg !== undefined ? parseInt(item.az_mg, 10) : null,
+        gx_dps: item.gx_dps !== undefined ? parseFloat(item.gx_dps) : null,
+        gy_dps: item.gy_dps !== undefined ? parseFloat(item.gy_dps) : null,
+        gz_dps: item.gz_dps !== undefined ? parseFloat(item.gz_dps) : null,
+        speed_kmh: item.speed_kmh !== undefined ? parseFloat(item.speed_kmh) : (item.speedKmh ? parseFloat(item.speedKmh) : null)
+      };
     }));
 
     const { data, error } = await supabase

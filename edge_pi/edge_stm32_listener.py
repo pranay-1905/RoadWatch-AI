@@ -204,8 +204,6 @@ def upload_to_gateway(p_id, road, ward, lat, lng, severity, depth, conf, shock_g
 # ---------------------------------------------------------------------------
 def process_telemetry(data):
     p_id = data.get("id", f"RW-NGP-{int(time.time()) % 10000}")
-    road = data.get("road", "West High Court Road")
-    ward = data.get("ward", "Ward 4 Dharampeth")
     lat = float(data.get("lat", 21.1458))
     lng = float(data.get("lng", 79.0882))
     shock = float(data.get("shock_g", 2.2))
@@ -220,11 +218,11 @@ def process_telemetry(data):
     # Step B: Run YOLOv8 Pothole Detection
     confidence = run_yolo_inference(img_path, shock)
 
-    # Step C: Check Wi-Fi -> Upload or Queue in SQLite
-    uploaded = upload_to_gateway(p_id, road, ward, lat, lng, severity, depth_cm, confidence, shock, speed, img_path)
+    # Step C: Check Wi-Fi -> Upload to API Gateway (Cloud backend handles Reverse Geocoding)
+    uploaded = upload_to_gateway(p_id, None, None, lat, lng, severity, depth_cm, confidence, shock, speed, img_path)
 
     # Step D: Save to local SQLite (marked synced=1 if uploaded, else synced=0 for retry)
-    record_pothole_offline(p_id, road, ward, lat, lng, severity, depth_cm, confidence, shock, speed, img_path, is_synced=1 if uploaded else 0)
+    record_pothole_offline(p_id, "Surveyed Corridor", "Central Zone", lat, lng, severity, depth_cm, confidence, shock, speed, img_path, is_synced=1 if uploaded else 0)
 
 def listen_stm32():
     init_db()

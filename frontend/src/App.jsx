@@ -103,10 +103,55 @@ export default function App() {
     }
   };
 
+  const loadBackendPotholes = async () => {
+    const result = await roadWatchApi.getPotholes();
+    if (!result.error && Array.isArray(result.data) && result.data.length > 0) {
+      const backendItems = result.data.map((item) => ({
+        id: item.id,
+        lat: Number(item.lat) || 0,
+        lng: Number(item.lng) || 0,
+        locationName: item.road_name ? `${item.road_name}${item.ward ? `, ${item.ward}` : ''}` : (item.locationName || 'Nagpur Surveyed Route'),
+        severity: String(item.severity || 'MEDIUM').toUpperCase(),
+        confidence: item.confidence ? (typeof item.confidence === 'number' && item.confidence <= 1 ? `${Math.round(item.confidence * 100)}%` : String(item.confidence)) : '92%',
+        imuGForce: item.peak_dev_g ? Number(item.peak_dev_g) : (item.imuGForce || 2.4),
+        speedKmh: item.speed_kmh ? Number(item.speed_kmh) : (item.speedKmh || 32.0),
+        timestamp: item.detected_at || item.created_at || new Date().toISOString(),
+        status: item.status === 'OPEN' ? 'PENDING' : (item.status || 'PENDING'),
+        estimatedCost: item.estimated_cost || (item.severity === 'CRITICAL' ? 45000 : 25000),
+        tenderDeadline: item.tender_deadline || '2026-10-30',
+        assignedVendor: item.assigned_vendor || null,
+        urgencyLevel: item.severity === 'CRITICAL' ? 'High Traffic Emergency' : 'Standard Routine',
+        dimensions: item.depth_cm ? `Depth: ${item.depth_cm} cm` : 'Standard Pothole',
+        imgUrl: item.image_url || null,
+        image: item.image_url || null,
+        repairProofImg: item.repair_proof_url || null,
+        bids: item.bids || [],
+        source: item.source || 'edge_pi'
+      }));
+
+      setPotholes((current) => {
+        const currentMap = new Map(current.map(p => [p.id, p]));
+        backendItems.forEach(b => {
+          const existing = currentMap.get(b.id);
+          if (existing) {
+            currentMap.set(b.id, { ...b, ...existing, status: existing.status || b.status });
+          } else {
+            currentMap.set(b.id, b);
+          }
+        });
+        return Array.from(currentMap.values());
+      });
+    }
+  };
+
   useEffect(() => {
-    if (currentUser?.role !== 'mnc') return undefined;
+    if (!currentUser) return undefined;
     loadCitizenReports();
-    const refreshTimer = window.setInterval(loadCitizenReports, 10000);
+    loadBackendPotholes();
+    const refreshTimer = window.setInterval(() => {
+      loadCitizenReports();
+      loadBackendPotholes();
+    }, 10000);
     return () => window.clearInterval(refreshTimer);
   }, [currentUser]);
 
