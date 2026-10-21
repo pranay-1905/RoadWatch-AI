@@ -21,8 +21,8 @@ import VendorMaster from './components/vendor/VendorMaster';
 // Operations Center Suite (SLA, Scores, Risk, Offline)
 import RoadWatchFeatures from './components/operations/RoadWatchFeatures';
 
-// Security & Authentication
 import AuthScreen from './components/auth/AuthScreen';
+import realPotholeDefectImg from './assets/real_pothole_defect.jpg';
 import './styles/App.css';
 
 export default function App() {
@@ -122,8 +122,8 @@ export default function App() {
         assignedVendor: item.assigned_vendor || null,
         urgencyLevel: item.severity === 'CRITICAL' ? 'High Traffic Emergency' : 'Standard Routine',
         dimensions: item.depth_cm ? `Depth: ${item.depth_cm} cm` : 'Standard Pothole',
-        imgUrl: item.image_url || null,
-        image: item.image_url || null,
+        imgUrl: item.image_url || realPotholeDefectImg,
+        image: item.image_url || realPotholeDefectImg,
         repairProofImg: item.repair_proof_url || null,
         bids: item.bids || [],
         source: item.source || 'edge_pi'

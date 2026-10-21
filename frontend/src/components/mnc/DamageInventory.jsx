@@ -12,6 +12,7 @@ import {
   X, 
   ShieldCheck 
 } from 'lucide-react';
+import realPotholeDefectImg from '../../assets/real_pothole_defect.jpg';
 
 export default function DamageInventory({ 
   data, 
@@ -577,7 +578,12 @@ export default function DamageInventory({
                     <td><strong>{item.id}</strong></td>
                     <td>
                       <div className="table-img-wrap">
-                        <img src={item.repairProofImg || item.imgUrl} className="table-img" alt="Snapshot" />
+                        <img 
+                          src={item.repairProofImg || item.imgUrl || realPotholeDefectImg} 
+                          className="table-img" 
+                          alt={item.id} 
+                          onError={(e) => { e.currentTarget.src = realPotholeDefectImg; }}
+                        />
                       </div>
                     </td>
                     <td>
