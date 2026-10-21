@@ -105,10 +105,8 @@ export default function App() {
 
   const loadBackendPotholes = async () => {
     const result = await roadWatchApi.getPotholes();
-    if (!result.error && Array.isArray(result.data) && result.data.length > 0) {
-      const backendItems = result.data
-        .filter((item) => !item.road_name?.toLowerCase().includes('delete me'))
-        .map((item) => ({
+    if (!result.error && Array.isArray(result.data)) {
+      const backendItems = result.data.map((item) => ({
         id: item.id,
         lat: Number(item.lat) || 0,
         lng: Number(item.lng) || 0,
@@ -131,8 +129,18 @@ export default function App() {
         source: item.source || 'edge_pi'
       }));
 
+      const backendIds = new Set(backendItems.map(b => b.id));
+      const initialIds = new Set(initialPotholes.map(p => p.id));
+
       setPotholes((current) => {
-        const currentMap = new Map(current.map(p => [p.id, p]));
+        // Filter out any previous backend/test item that was deleted from Supabase!
+        const retainedCurrent = current.filter(p => {
+          if (p.source === 'Citizen Report') return true;
+          if (initialIds.has(p.id)) return true;
+          return backendIds.has(p.id);
+        });
+
+        const currentMap = new Map(retainedCurrent.map(p => [p.id, p]));
         backendItems.forEach(b => {
           const existing = currentMap.get(b.id);
           if (existing) {
