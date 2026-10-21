@@ -106,7 +106,9 @@ export default function App() {
   const loadBackendPotholes = async () => {
     const result = await roadWatchApi.getPotholes();
     if (!result.error && Array.isArray(result.data) && result.data.length > 0) {
-      const backendItems = result.data.map((item) => ({
+      const backendItems = result.data
+        .filter((item) => !item.road_name?.toLowerCase().includes('delete me'))
+        .map((item) => ({
         id: item.id,
         lat: Number(item.lat) || 0,
         lng: Number(item.lng) || 0,
