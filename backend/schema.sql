@@ -8,28 +8,38 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 2. POTHOLES TABLE (Synchronized from Raspberry Pi 3B+ Edge AI & Field Patrols)
 CREATE TABLE IF NOT EXISTS public.potholes (
-    id TEXT PRIMARY KEY,                       -- e.g. 'NMC-2026-0942'
-    road_name TEXT NOT NULL,                  -- e.g. 'Wardha Road Highway'
-    ward TEXT NOT NULL,                       -- e.g. 'Dharampeth (Ward 2)'
-    lat DOUBLE PRECISION NOT NULL,            -- e.g. 21.1458
-    lng DOUBLE PRECISION NOT NULL,            -- e.g. 79.0882
-    severity TEXT NOT NULL CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')),
+    id TEXT PRIMARY KEY DEFAULT ('RW-' || floor(random() * 900000 + 100000)::text),
+    road_name TEXT DEFAULT 'Nagpur Surveyed Corridor',
+    ward TEXT DEFAULT 'Central Zone',
+    lat DOUBLE PRECISION,
+    lng DOUBLE PRECISION,
+    lon DOUBLE PRECISION,
+    severity TEXT DEFAULT 'MEDIUM',
     depth_cm NUMERIC DEFAULT 5.0,
-    status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'TENDER_ACTIVE', 'ASSIGNED', 'IN_PROGRESS', 'RESOLVED', 'VERIFIED')),
+    status TEXT NOT NULL DEFAULT 'OPEN',
     image_url TEXT,                           -- Supabase bucket URL or edge photo path
     repair_image_url TEXT,                    -- Contractor completion verification photo
     sla_hours INTEGER DEFAULT 48,
-    source TEXT DEFAULT 'manual',             -- 'edge_pi', 'manual', 'citizen'
-    detected_at TIMESTAMP WITH TIME ZONE,
-    confidence REAL,                          -- AI confidence (e.g. 0.94)
-    peak_dev_g REAL,                          -- IMU Peak G-Force deviation
+    source TEXT DEFAULT 'edge_pi',            -- 'edge_pi', 'manual', 'citizen'
+    detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    event_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    confidence REAL DEFAULT 0.92,             -- AI confidence (e.g. 0.94)
+    score REAL DEFAULT 0.92,
+    peak_dev_g REAL DEFAULT 2.4,              -- IMU Peak G-Force deviation
+    peak_mg REAL DEFAULT 2400.0,
+    ax REAL,
+    ay REAL,
+    az REAL,
     ax_mg INTEGER,                            -- Accelerometer X (mG)
     ay_mg INTEGER,                            -- Accelerometer Y (mG)
     az_mg INTEGER,                            -- Accelerometer Z (mG)
     gx_dps REAL,                              -- Gyroscope X (deg/sec)
     gy_dps REAL,                              -- Gyroscope Y (deg/sec)
     gz_dps REAL,                              -- Gyroscope Z (deg/sec)
-    speed_kmh REAL,                           -- Vehicle speed at detection
+    speed_kmh REAL DEFAULT 30.0,              -- Vehicle speed at detection
+    gps_fix INTEGER DEFAULT 1,
+    imu_ok INTEGER DEFAULT 1,
+    note TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     resolved_at TIMESTAMP WITH TIME ZONE
 );

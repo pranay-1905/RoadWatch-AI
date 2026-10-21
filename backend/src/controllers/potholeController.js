@@ -58,8 +58,8 @@ export const syncEdgeBatch = async (req, res, next) => {
     // Resolve real road names from GPS coordinates (Reverse Geocoding)
     const sanitized = await Promise.all(potholesToInsert.map(async (item) => {
       const lat = parseFloat(item.lat);
-      const lng = parseFloat(item.lng);
-      let road_name = item.road_name;
+      const lng = parseFloat(item.lng ?? item.lon);
+      let road_name = item.road_name || item.note;
       let ward = item.ward;
 
       // If road_name is generic or empty, convert lat/lng to real street address
@@ -69,9 +69,12 @@ export const syncEdgeBatch = async (req, res, next) => {
           road_name = geo.roadName;
           ward = geo.ward || ward;
         } else {
-          road_name = `Surveyed Road Corridor (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+          road_name = item.note || `Surveyed Road Corridor (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
         }
       }
+
+      const scoreVal = item.confidence !== undefined ? parseFloat(item.confidence) : (item.score !== undefined ? parseFloat(item.score) : null);
+      const peakGVal = item.peak_dev_g !== undefined ? parseFloat(item.peak_dev_g) : (item.peak_mg !== undefined ? parseFloat((item.peak_mg / 1000).toFixed(2)) : (item.imuGForce ? parseFloat(item.imuGForce) : null));
 
       return {
         id: item.id || `NMC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
@@ -79,22 +82,26 @@ export const syncEdgeBatch = async (req, res, next) => {
         ward: ward || 'Central Zone',
         lat,
         lng,
-        severity: (item.severity || 'MEDIUM').toUpperCase(),
+        lon: lng,
+        severity: (item.severity || (peakGVal && peakGVal > 3.0 ? 'CRITICAL' : 'MEDIUM')).toUpperCase(),
         depth_cm: parseFloat(item.depth_cm || 5.0),
         status: item.status || 'OPEN',
         image_url: item.image_url || null,
         sla_hours: item.severity === 'CRITICAL' ? 24 : item.severity === 'HIGH' ? 48 : 72,
         source: item.source || 'edge_pi',
-        detected_at: item.detected_at || new Date().toISOString(),
-        confidence: item.confidence !== undefined ? parseFloat(item.confidence) : null,
-        peak_dev_g: item.peak_dev_g !== undefined ? parseFloat(item.peak_dev_g) : (item.imuGForce ? parseFloat(item.imuGForce) : null),
-        ax_mg: item.ax_mg !== undefined ? parseInt(item.ax_mg, 10) : null,
-        ay_mg: item.ay_mg !== undefined ? parseInt(item.ay_mg, 10) : null,
-        az_mg: item.az_mg !== undefined ? parseInt(item.az_mg, 10) : null,
+        detected_at: item.event_time || item.detected_at || new Date().toISOString(),
+        confidence: scoreVal,
+        score: scoreVal,
+        peak_dev_g: peakGVal,
+        peak_mg: item.peak_mg !== undefined ? parseFloat(item.peak_mg) : (peakGVal ? peakGVal * 1000 : null),
+        ax_mg: item.ax_mg !== undefined ? parseInt(item.ax_mg, 10) : (item.ax !== undefined ? parseInt(item.ax, 10) : null),
+        ay_mg: item.ay_mg !== undefined ? parseInt(item.ay_mg, 10) : (item.ay !== undefined ? parseInt(item.ay, 10) : null),
+        az_mg: item.az_mg !== undefined ? parseInt(item.az_mg, 10) : (item.az !== undefined ? parseInt(item.az, 10) : null),
         gx_dps: item.gx_dps !== undefined ? parseFloat(item.gx_dps) : null,
         gy_dps: item.gy_dps !== undefined ? parseFloat(item.gy_dps) : null,
         gz_dps: item.gz_dps !== undefined ? parseFloat(item.gz_dps) : null,
-        speed_kmh: item.speed_kmh !== undefined ? parseFloat(item.speed_kmh) : (item.speedKmh ? parseFloat(item.speedKmh) : null)
+        speed_kmh: item.speed_kmh !== undefined ? parseFloat(item.speed_kmh) : (item.speedKmh ? parseFloat(item.speedKmh) : null),
+        note: item.note || null
       };
     }));
 

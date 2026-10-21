@@ -107,15 +107,15 @@ export default function App() {
     const result = await roadWatchApi.getPotholes();
     if (!result.error && Array.isArray(result.data)) {
       const backendItems = result.data.map((item) => ({
-        id: item.id,
+        id: String(item.id),
         lat: Number(item.lat) || 0,
-        lng: Number(item.lng) || 0,
-        locationName: item.road_name ? `${item.road_name}${item.ward ? `, ${item.ward}` : ''}` : (item.locationName || 'Nagpur Surveyed Route'),
-        severity: String(item.severity || 'MEDIUM').toUpperCase(),
-        confidence: item.confidence ? (typeof item.confidence === 'number' && item.confidence <= 1 ? `${Math.round(item.confidence * 100)}%` : String(item.confidence)) : '92%',
-        imuGForce: item.peak_dev_g ? Number(item.peak_dev_g) : (item.imuGForce || 2.4),
+        lng: Number(item.lng ?? item.lon) || 0,
+        locationName: item.road_name ? `${item.road_name}${item.ward ? `, ${item.ward}` : ''}` : (item.note || item.locationName || 'Nagpur Surveyed Route'),
+        severity: String(item.severity || (item.peak_mg && Number(item.peak_mg) > 3000 ? 'CRITICAL' : 'HIGH')).toUpperCase(),
+        confidence: item.confidence ? (typeof item.confidence === 'number' && item.confidence <= 1 ? `${Math.round(item.confidence * 100)}%` : String(item.confidence)) : (item.score ? `${Math.round((Number(item.score) <= 1 ? Number(item.score) : Number(item.score) / 100) * 100)}%` : '92%'),
+        imuGForce: item.peak_dev_g ? Number(item.peak_dev_g) : (item.peak_mg ? Number((Number(item.peak_mg) / 1000).toFixed(2)) : (item.imuGForce || 2.4)),
         speedKmh: item.speed_kmh ? Number(item.speed_kmh) : (item.speedKmh || 32.0),
-        timestamp: item.detected_at || item.created_at || new Date().toISOString(),
+        timestamp: item.event_time || item.detected_at || item.created_at || new Date().toISOString(),
         status: item.status === 'OPEN' ? 'PENDING' : (item.status || 'PENDING'),
         estimatedCost: item.estimated_cost || (item.severity === 'CRITICAL' ? 45000 : 25000),
         tenderDeadline: item.tender_deadline || '2026-10-30',
