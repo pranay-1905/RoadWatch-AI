@@ -1,7 +1,7 @@
 /* MODAL EXTENSIONS */
 .modal-large {
-  width: min(880px, 95vw);
-  max-width: 880px;
+  width: min(980px, 95vw);
+  max-width: 980px;
 }
 
 .modal-bidding {

@@ -5,12 +5,35 @@ import {
   CheckCircle2, 
   UserCheck, 
   Clock, 
+  Calendar,
   ShieldCheck, 
   MapPin, 
   Camera, 
   Award, 
-  RotateCcw
+  RotateCcw,
+  Maximize2
 } from 'lucide-react';
+
+const parseDate = (ts) => {
+  if (!ts) return null;
+  if (ts instanceof Date) return isNaN(ts.getTime()) ? null : ts;
+  let d = new Date(ts);
+  if (!isNaN(d.getTime())) return d;
+  if (typeof ts === 'string') {
+    d = new Date(ts.replace(' ', 'T'));
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+};
+
+const formatPotholeTime = (ts) => {
+  if (!ts) return { dateStr: 'Recently Surveyed', timeStr: '' };
+  const d = parseDate(ts);
+  if (!d) return { dateStr: String(ts).slice(0, 10), timeStr: '' };
+  const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+  return { dateStr, timeStr };
+};
 
 export default function PotholeModal({ 
   pothole, 
@@ -27,6 +50,7 @@ export default function PotholeModal({
   const [activeProofIndex, setActiveProofIndex] = useState(0);
   const [selectedBidIndex, setSelectedBidIndex] = useState(0);
   const [tenderAmount, setTenderAmount] = useState('');
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
 
   if (!pothole) return null;
 
@@ -48,6 +72,8 @@ export default function PotholeModal({
     statusText = 'WORK DONE & PAYMENT APPROVED';
     statusBadgeClass = 'badge-repaired';
   }
+
+  const detectTime = formatPotholeTime(pothole.timestamp || pothole.event_time || pothole.detected_at || pothole.created_at);
 
   const proofImagesList = pothole.repairProofImages || (pothole.repairProofImg ? [pothole.repairProofImg] : []);
   const hasRepairEvidence = proofImagesList.length > 0;
@@ -180,22 +206,89 @@ export default function PotholeModal({
               </div>
             </div>
           ) : (
-            /* STANDARD SINGLE IMAGE BANNER FOR PENDING DEFECTS */
-            <div className="modal-image-container">
-              <div className="modal-img-wrapper">
-                <img src={pothole.imgUrl} alt="Pothole Snapshot" />
-                <div className="modal-img-badge">YOLOv8 AI Detection: {pothole.confidence}</div>
-              </div>
+            /* SINGLE COMPLETE IMAGE BANNER WITH FULLSCREEN EXPAND */
+            <div 
+              className="modal-single-image-box"
+              style={{
+                position: 'relative',
+                width: '100%',
+                minHeight: '260px',
+                maxHeight: '440px',
+                borderRadius: '14px',
+                overflow: 'hidden',
+                backgroundColor: '#090d16',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                border: '1px solid #1e293b',
+                boxShadow: '0 4px 14px rgba(0, 0, 0, 0.18)'
+              }}
+              onClick={() => setIsLightboxOpen(true)}
+            >
+              <img 
+                src={pothole.imgUrl} 
+                alt="Pothole Detection Camera View" 
+                style={{
+                  width: '100%',
+                  height: 'auto',
+                  maxHeight: '440px',
+                  objectFit: 'contain',
+                  display: 'block'
+                }}
+              />
+              <div className="modal-img-badge">YOLOv8 AI Detection: {pothole.confidence || 'Detected'}</div>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setIsLightboxOpen(true); }}
+                style={{
+                  position: 'absolute',
+                  top: '12px',
+                  right: '12px',
+                  background: 'rgba(15, 23, 42, 0.88)',
+                  color: 'white',
+                  border: '1px solid rgba(255, 255, 255, 0.25)',
+                  borderRadius: '6px',
+                  padding: '6px 12px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backdropFilter: 'blur(4px)',
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.35)',
+                  zIndex: 10
+                }}
+                title="Click to view full uncropped image in fullscreen"
+              >
+                <Maximize2 style={{ width: '12px', height: '12px' }} /> Fullscreen View
+              </button>
             </div>
           )}
 
           {/* TELEMETRY & SPECIFICATIONS GRID */}
           <div className="modal-details-grid mt-3">
+            {/* 1. DETECTION DATE & TIME CARD */}
+            <div className="detail-box">
+              <span className="lbl">Detection Date & Time</span>
+              <span className="val" style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'wrap' }}>
+                <Calendar style={{ width: '12px', height: '12px', color: '#4f46e5', flexShrink: 0 }} />
+                <span style={{ fontWeight: 700 }}>{detectTime.dateStr}</span>
+                {detectTime.timeStr && (
+                  <span style={{ color: '#64748b', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '2px' }}>
+                    <Clock style={{ width: '10px', height: '10px', color: '#94a3b8' }} />
+                    {detectTime.timeStr}
+                  </span>
+                )}
+              </span>
+            </div>
+
             <div className="detail-box">
               <span className="lbl">GPS Spatial Coordinates</span>
               <span className="val">
                 <MapPin className="w-3.5 h-3.5 inline text-indigo-600 mr-1" />
-                {pothole.lat?.toFixed(4)}° N, {pothole.lng?.toFixed(4)}° E ({pothole.locationName})
+                {pothole.lat ? Number(pothole.lat).toFixed(4) : '21.1458'}° N, {pothole.lng ? Number(pothole.lng).toFixed(4) : '79.0882'}° E ({pothole.locationName})
               </span>
             </div>
             <div className="detail-box">
@@ -204,11 +297,11 @@ export default function PotholeModal({
             </div>
             <div className="detail-box">
               <span className="lbl">IMU Shock Spike</span>
-              <span className="val">{pothole.imuGForce} G</span>
+              <span className="val">{pothole.imuGForce || 2.4} G</span>
             </div>
             <div className="detail-box">
               <span className="lbl">Vehicle Survey Speed</span>
-              <span className="val">{pothole.speedKmh} km/h</span>
+              <span className="val">{pothole.speedKmh || 32} km/h</span>
             </div>
             {pothole.status !== 'PENDING' && (
               <div className="detail-box">
@@ -469,6 +562,21 @@ export default function PotholeModal({
           )}
         </div>
       </div>
+
+      {/* FULLSCREEN HD LIGHTBOX OVERLAY */}
+      {isLightboxOpen && (
+        <div className="image-lightbox-overlay" onClick={() => setIsLightboxOpen(false)}>
+          <div className="image-lightbox-content" onClick={(e) => e.stopPropagation()}>
+            <button className="image-lightbox-close" onClick={() => setIsLightboxOpen(false)}>
+              ✕ Close Fullscreen (Esc)
+            </button>
+            <img src={pothole.imgUrl} alt="Pothole Full Resolution" />
+            <div style={{ color: 'white', marginTop: '12px', fontSize: '13px', textAlign: 'center' }}>
+              <strong>#{pothole.id}</strong> — {pothole.locationName || 'Nagpur Surveyed Corridor'} ({detectTime.dateStr} {detectTime.timeStr ? `• ${detectTime.timeStr}` : ''})
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

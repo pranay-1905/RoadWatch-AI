@@ -6,6 +6,7 @@ import {
   FileText, 
   UserCheck, 
   Clock, 
+  Calendar,
   Camera, 
   Award, 
   ArrowUpDown, 
@@ -13,6 +14,53 @@ import {
   ShieldCheck 
 } from 'lucide-react';
 import realPotholeDefectImg from '../../assets/real_pothole_defect.jpg';
+
+export const parseDate = (ts) => {
+  if (!ts) return null;
+  if (ts instanceof Date) return isNaN(ts.getTime()) ? null : ts;
+  let d = new Date(ts);
+  if (!isNaN(d.getTime())) return d;
+  if (typeof ts === 'string') {
+    d = new Date(ts.replace(' ', 'T'));
+    if (!isNaN(d.getTime())) return d;
+  }
+  return null;
+};
+
+export const formatDetectionTime = (timestamp) => {
+  if (!timestamp) return { dateStr: 'Recently', timeStr: '', relativeStr: 'Live Sensor', isRecent: false, rawTime: 0 };
+  const d = parseDate(timestamp);
+  if (!d) return { dateStr: String(timestamp).slice(0, 10), timeStr: '', relativeStr: '', isRecent: false, rawTime: 0 };
+
+  const rawTime = d.getTime();
+  const dateStr = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+  const diffMs = Date.now() - rawTime;
+  const diffMins = Math.round(diffMs / (1000 * 60));
+  const diffHours = Math.round(diffMs / (1000 * 60 * 60));
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+  let relativeStr = '';
+  let isRecent = false;
+
+  if (diffMs < 0 || diffMins < 60) {
+    relativeStr = diffMins <= 5 ? 'Just Now' : `${Math.max(1, diffMins)}m ago`;
+    isRecent = true;
+  } else if (diffHours < 24) {
+    relativeStr = `${diffHours}h ago`;
+    isRecent = true;
+  } else if (diffDays === 1) {
+    relativeStr = 'Yesterday';
+    isRecent = true;
+  } else if (diffDays < 7) {
+    relativeStr = `${diffDays}d ago`;
+  } else {
+    relativeStr = dateStr;
+  }
+
+  return { dateStr, timeStr, relativeStr, isRecent, rawTime };
+};
 
 export default function DamageInventory({ 
   data, 
@@ -25,8 +73,9 @@ export default function DamageInventory({
   const [statusFilter, setStatusFilter] = useState('all');
   const [slaFilter, setSlaFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState('all'); // 'all' | 'recent_24h' | 'today' | 'recent_7d' | 'older'
   const [workflowTab, setWorkflowTab] = useState('all'); // 'all' | 'needs_action' | 'in_progress' | 'completed'
-  const [sortBy, setSortBy] = useState('action_needed'); // 'action_needed' | 'completed_first' | 'severity_desc' | 'sla_urgency' | 'id_desc'
+  const [sortBy, setSortBy] = useState('action_needed'); // 'most_recent' | 'action_needed' | 'completed_first' | 'severity_desc' | 'sla_urgency' | 'oldest_first' | 'id_desc'
   const [showPrintModal, setShowPrintModal] = useState(false);
 
   const getSlaInfo = (item) => {
@@ -96,17 +145,43 @@ export default function DamageInventory({
       matchWorkflow = item.status === 'WORK_DONE';
     }
 
+    // Detection Date & Time Filter
+    const rawTs = item.timestamp || item.event_time || item.detected_at || item.created_at;
+    const parsedD = parseDate(rawTs);
+    const itemTimestamp = parsedD ? parsedD.getTime() : 0;
+    const now = Date.now();
+    let matchTime = true;
+    if (timeFilter === 'recent_24h') {
+      matchTime = itemTimestamp > 0 && (now - itemTimestamp) <= 24 * 60 * 60 * 1000;
+    } else if (timeFilter === 'today') {
+      matchTime = itemTimestamp > 0 && parsedD && parsedD.toDateString() === new Date(now).toDateString();
+    } else if (timeFilter === 'recent_7d') {
+      matchTime = itemTimestamp > 0 && (now - itemTimestamp) <= 7 * 24 * 60 * 60 * 1000;
+    } else if (timeFilter === 'older') {
+      matchTime = itemTimestamp === 0 || (now - itemTimestamp) > 7 * 24 * 60 * 60 * 1000;
+    }
+
     const searchableLocation = item.locationName || item.location || item.ward || item.roadName || '';
     const matchQ = !searchQuery || 
       String(item.id || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
       searchableLocation.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (item.assignedVendor && item.assignedVendor.toLowerCase().includes(searchQuery.toLowerCase()));
     
-    return matchSource && matchSev && matchStat && matchSla && matchWorkflow && matchQ;
+    return matchSource && matchSev && matchStat && matchSla && matchWorkflow && matchTime && matchQ;
   });
 
   // Apply arrangement / sorting
   const sortedData = [...filteredData].sort((a, b) => {
+    if (sortBy === 'most_recent') {
+      const tA = parseDate(a.timestamp || a.event_time || a.detected_at || a.created_at)?.getTime() || 0;
+      const tB = parseDate(b.timestamp || b.event_time || b.detected_at || b.created_at)?.getTime() || 0;
+      if (tA !== tB) return tB - tA;
+    }
+    if (sortBy === 'oldest_first') {
+      const tA = parseDate(a.timestamp || a.event_time || a.detected_at || a.created_at)?.getTime() || 0;
+      const tB = parseDate(b.timestamp || b.event_time || b.detected_at || b.created_at)?.getTime() || 0;
+      if (tA !== tB) return tA - tB;
+    }
     if (sortBy === 'completed_first') {
       const aDone = a.status === 'WORK_DONE' ? 1 : 0;
       const bDone = b.status === 'WORK_DONE' ? 1 : 0;
@@ -459,10 +534,12 @@ export default function DamageInventory({
               onChange={(e) => setSortBy(e.target.value)}
               style={{ fontWeight: 600, color: '#0f172a' }}
             >
+              <option value="most_recent">⚡ Most Recent Detection First</option>
               <option value="action_needed">Action Needed First</option>
               <option value="completed_first">Completed Works First</option>
               <option value="severity_desc">Highest Severity First</option>
               <option value="sla_urgency">SLA Overdue First</option>
+              <option value="oldest_first">Oldest Detection First</option>
               <option value="id_desc">Newest Defect ID</option>
             </select>
           </div>
@@ -475,6 +552,26 @@ export default function DamageInventory({
             <span>Road Defect & Contractor Bidding Register</span>
           </div>
           <div className="table-actions">
+            {/* DETECTION DATE & TIME FILTER */}
+            <select
+              className="form-control form-control-sm"
+              value={timeFilter}
+              onChange={(e) => setTimeFilter(e.target.value)}
+              style={{ 
+                fontWeight: 600, 
+                color: timeFilter !== 'all' ? '#4f46e5' : '#0f172a',
+                borderColor: timeFilter !== 'all' ? '#818cf8' : undefined,
+                background: timeFilter !== 'all' ? '#f5f3ff' : undefined
+              }}
+              title="Filter potholes by when they were detected"
+            >
+              <option value="all">🕒 All Detection Dates</option>
+              <option value="recent_24h">⚡ Detected in Last 24h</option>
+              <option value="today">☀️ Detected Today</option>
+              <option value="recent_7d">📅 Detected This Week</option>
+              <option value="older">🗂️ Older Archive</option>
+            </select>
+
             <select
               className="form-control form-control-sm"
               value={severityFilter}
@@ -497,18 +594,6 @@ export default function DamageInventory({
               <option value="IN_PROGRESS">In Progress (Contractor Assigned)</option>
               <option value="VERIFICATION_PENDING">Awaiting MNC Verification (Proof Sent)</option>
               <option value="WORK_DONE">Work Done (Verified)</option>
-            </select>
-
-            <select
-              className="form-control form-control-sm"
-              value={slaFilter}
-              onChange={(e) => setSlaFilter(e.target.value)}
-            >
-              <option value="all">All SLA Timelines</option>
-              <option value="ON_TRACK">SLA: On Track</option>
-              <option value="AT_RISK">SLA: At Risk</option>
-              <option value="OVERDUE">SLA: Overdue</option>
-              <option value="COMPLETED">SLA: Completed</option>
             </select>
 
             {/* EXPORT CSV BUTTON */}
@@ -541,6 +626,7 @@ export default function DamageInventory({
                 <th>Defect ID</th>
                 <th>Camera Snapshot</th>
                 <th>Location / Coords</th>
+                <th>Detected Date & Time</th>
                 <th>Severity</th>
                 <th>Contractor & Bids</th>
                 <th>SLA & Deadline</th>
@@ -589,6 +675,25 @@ export default function DamageInventory({
                     <td>
                       <strong>{item.locationName}</strong><br />
                       <small style={{ color: '#64748b' }}>({item.lat ? item.lat.toFixed(4) : '21.1458'}, {item.lng ? item.lng.toFixed(4) : '79.0882'})</small>
+                    </td>
+                    <td>
+                      {(() => {
+                        const timeInfo = formatDetectionTime(item.timestamp || item.event_time || item.detected_at || item.created_at);
+                        return (
+                          <div className="detection-time-cell">
+                            <div className="detection-date-line">
+                              <Calendar style={{ width: '12px', height: '12px', color: '#4f46e5', flexShrink: 0, marginRight: '4px' }} />
+                              <span>{timeInfo.dateStr}</span>
+                            </div>
+                            {timeInfo.timeStr && (
+                              <div className="detection-time-line">
+                                <Clock style={{ width: '11px', height: '11px', color: '#94a3b8', flexShrink: 0, marginRight: '4px' }} />
+                                <span>{timeInfo.timeStr}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td><span className={`badge ${item.severity ? item.severity.toLowerCase() : 'medium'}`}>{item.severity}</span></td>
                     <td>
