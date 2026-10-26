@@ -15,24 +15,18 @@ CREATE TABLE IF NOT EXISTS public.potholes (
     lng DOUBLE PRECISION,
     lon DOUBLE PRECISION,
     severity TEXT DEFAULT 'MEDIUM',
-    depth_cm NUMERIC DEFAULT 5.0,
     status TEXT NOT NULL DEFAULT 'OPEN',
     image_url TEXT,                           -- Supabase bucket URL or edge photo path
     repair_image_url TEXT,                    -- Contractor completion verification photo
     sla_hours INTEGER DEFAULT 48,
     source TEXT DEFAULT 'edge_pi',            -- 'edge_pi', 'manual', 'citizen'
-    detected_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     event_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     confidence REAL DEFAULT 0.92,             -- AI confidence (e.g. 0.94)
-    score REAL DEFAULT 0.92,
     peak_dev_g REAL DEFAULT 2.4,              -- IMU Peak G-Force deviation
     peak_mg REAL DEFAULT 2400.0,
     ax REAL,
     ay REAL,
     az REAL,
-    ax_mg INTEGER,                            -- Accelerometer X (mG)
-    ay_mg INTEGER,                            -- Accelerometer Y (mG)
-    az_mg INTEGER,                            -- Accelerometer Z (mG)
     gx_dps REAL,                              -- Gyroscope X (deg/sec)
     gy_dps REAL,                              -- Gyroscope Y (deg/sec)
     gz_dps REAL,                              -- Gyroscope Z (deg/sec)
@@ -40,7 +34,6 @@ CREATE TABLE IF NOT EXISTS public.potholes (
     gps_fix INTEGER DEFAULT 1,
     imu_ok INTEGER DEFAULT 1,
     note TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     resolved_at TIMESTAMP WITH TIME ZONE
 );
 
@@ -116,9 +109,9 @@ FOR ALL USING (bucket_id = 'pothole-photos')
 WITH CHECK (bucket_id = 'pothole-photos');
 
 -- 8. INITIAL SEED DATA FOR NAGPUR (DEMO RECORDS)
-INSERT INTO public.potholes (id, road_name, ward, lat, lng, severity, depth_cm, status, image_url, sla_hours)
+INSERT INTO public.potholes (id, road_name, ward, lat, lng, severity, status, image_url, sla_hours)
 VALUES 
-  ('NMC-2026-0941', 'Wardha Road - Airport Flyover', 'Dharampeth (Ward 2)', 21.1458, 79.0882, 'CRITICAL', 8.5, 'OPEN', 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop', 24),
-  ('NMC-2026-0942', 'Central Avenue - Gandhibagh', 'Gandhibagh (Ward 4)', 21.1524, 79.1121, 'HIGH', 6.2, 'TENDER_ACTIVE', 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=600&auto=format&fit=crop', 48),
-  ('NMC-2026-0943', 'Amravati Road - University Gate', 'Dharampeth (Ward 2)', 21.1399, 79.0521, 'MEDIUM', 4.1, 'IN_PROGRESS', 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop', 72)
+  ('NMC-2026-0941', 'Wardha Road - Airport Flyover', 'Dharampeth (Ward 2)', 21.1458, 79.0882, 'CRITICAL', 'OPEN', 'https://images.unsplash.com/photo-1515162816999-a0c47dc192f7?w=600&auto=format&fit=crop', 24),
+  ('NMC-2026-0942', 'Central Avenue - Gandhibagh', 'Gandhibagh (Ward 4)', 21.1524, 79.1121, 'HIGH', 'TENDER_ACTIVE', 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=600&auto=format&fit=crop', 48),
+  ('NMC-2026-0943', 'Amravati Road - University Gate', 'Dharampeth (Ward 2)', 21.1399, 79.0521, 'MEDIUM', 'IN_PROGRESS', 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop', 72)
 ON CONFLICT (id) DO NOTHING;

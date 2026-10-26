@@ -98,7 +98,8 @@ export default function App() {
           }
           return r;
         });
-        return [...current.filter((item) => item.source !== 'Citizen Report'), ...mergedReports];
+        const reportIds = new Set(mergedReports.map(r => r.id));
+        return [...current.filter((item) => !reportIds.has(item.id)), ...mergedReports];
       });
     }
   };
@@ -106,47 +107,42 @@ export default function App() {
   const loadBackendPotholes = async () => {
     const result = await roadWatchApi.getPotholes();
     if (!result.error && Array.isArray(result.data)) {
-      const backendItems = result.data.map((item) => ({
-        id: String(item.id),
-        lat: Number(item.lat) || 0,
-        lng: Number(item.lng ?? item.lon) || 0,
-        locationName: item.road_name ? `${item.road_name}${item.ward ? `, ${item.ward}` : ''}` : (item.note || item.locationName || 'Nagpur Surveyed Route'),
-        severity: String(item.severity || (item.peak_mg && Number(item.peak_mg) > 3000 ? 'CRITICAL' : 'HIGH')).toUpperCase(),
-        confidence: item.confidence ? (typeof item.confidence === 'number' && item.confidence <= 1 ? `${Math.round(item.confidence * 100)}%` : String(item.confidence)) : (item.score ? `${Math.round((Number(item.score) <= 1 ? Number(item.score) : Number(item.score) / 100) * 100)}%` : '92%'),
-        imuGForce: item.peak_dev_g ? Number(item.peak_dev_g) : (item.peak_mg ? Number((Number(item.peak_mg) / 1000).toFixed(2)) : (item.imuGForce || 2.4)),
-        speedKmh: item.speed_kmh ? Number(item.speed_kmh) : (item.speedKmh || 32.0),
-        timestamp: item.event_time || item.detected_at || item.created_at || new Date().toISOString(),
-        status: item.status === 'OPEN' ? 'PENDING' : (item.status || 'PENDING'),
-        estimatedCost: item.estimated_cost || (item.severity === 'CRITICAL' ? 45000 : 25000),
-        tenderDeadline: item.tender_deadline || '2026-10-30',
-        assignedVendor: item.assigned_vendor || null,
-        urgencyLevel: item.severity === 'CRITICAL' ? 'High Traffic Emergency' : 'Standard Routine',
-        dimensions: item.depth_cm ? `Depth: ${item.depth_cm} cm` : 'Standard Pothole',
-        imgUrl: item.image_url || realPotholeDefectImg,
-        image: item.image_url || realPotholeDefectImg,
-        repairProofImg: item.repair_proof_url || null,
-        bids: item.bids || [],
-        source: item.source || 'edge_pi'
-      }));
-
-      const backendIds = new Set(backendItems.map(b => b.id));
-      const initialIds = new Set(initialPotholes.map(p => p.id));
+      const backendItems = result.data.map((item) => {
+        const isCitizenItem = item.source === 'citizen' || item.source === 'Citizen Report' || String(item.id).startsWith('RPT-');
+        return {
+          id: String(item.id),
+          lat: Number(item.lat) || 0,
+          lng: Number(item.lng ?? item.lon) || 0,
+          locationName: item.road_name ? `${item.road_name}${item.ward ? `, ${item.ward}` : ''}` : (item.note || item.locationName || 'Nagpur Surveyed Route'),
+          severity: String(item.severity || (item.peak_mg && Number(item.peak_mg) > 3000 ? 'CRITICAL' : 'HIGH')).toUpperCase(),
+          confidence: isCitizenItem ? 'Citizen Verified' : (item.confidence ? (typeof item.confidence === 'number' && item.confidence <= 1 ? `${Math.round(item.confidence * 100)}%` : String(item.confidence)) : (item.score ? `${Math.round((Number(item.score) <= 1 ? Number(item.score) : Number(item.score) / 100) * 100)}%` : '92%')),
+          imuGForce: isCitizenItem ? null : (item.peak_dev_g ? Number(item.peak_dev_g) : (item.peak_mg ? Number((Number(item.peak_mg) / 1000).toFixed(2)) : (item.imuGForce || 2.4))),
+          speedKmh: isCitizenItem ? null : (item.speed_kmh ? Number(item.speed_kmh) : (item.speedKmh || 32.0)),
+          timestamp: item.event_time || item.detected_at || item.created_at || new Date().toISOString(),
+          status: item.status === 'OPEN' ? 'PENDING' : (item.status || 'PENDING'),
+          estimatedCost: item.estimated_cost || (item.severity === 'CRITICAL' ? 45000 : 25000),
+          tenderDeadline: item.tender_deadline || '2026-10-30',
+          assignedVendor: item.assigned_vendor || null,
+          urgencyLevel: item.severity === 'CRITICAL' ? 'High Traffic Emergency' : 'Standard Routine',
+          dimensions: isCitizenItem ? 'Citizen Visual Assessment' : 'Standard Surface Defect',
+          description: item.note || item.description || null,
+          imgUrl: item.image_url || realPotholeDefectImg,
+          image: item.image_url || realPotholeDefectImg,
+          repairProofImg: item.repair_proof_url || null,
+          bids: item.bids || [],
+          source: isCitizenItem ? 'Citizen Report' : (item.source || 'edge_pi')
+        };
+      });
 
       setPotholes((current) => {
-        // Filter out any previous backend/test item that was deleted from Supabase!
-        const retainedCurrent = current.filter(p => {
-          if (p.source === 'Citizen Report') return true;
-          if (initialIds.has(p.id)) return true;
-          return backendIds.has(p.id);
+        const currentMap = new Map();
+        current.forEach(p => {
+          if (p && p.id) currentMap.set(p.id, p);
         });
-
-        const currentMap = new Map(retainedCurrent.map(p => [p.id, p]));
         backendItems.forEach(b => {
-          const existing = currentMap.get(b.id);
-          if (existing) {
-            currentMap.set(b.id, { ...b, ...existing, status: existing.status || b.status });
-          } else {
-            currentMap.set(b.id, b);
+          if (b && b.id) {
+            const existing = currentMap.get(b.id);
+            currentMap.set(b.id, existing ? { ...b, ...existing, status: existing.status || b.status } : b);
           }
         });
         return Array.from(currentMap.values());
@@ -158,10 +154,11 @@ export default function App() {
     if (!currentUser) return undefined;
     loadCitizenReports();
     loadBackendPotholes();
+    // Fast 3-second auto-polling for instant real-time sync with database
     const refreshTimer = window.setInterval(() => {
       loadCitizenReports();
       loadBackendPotholes();
-    }, 10000);
+    }, 3000);
     return () => window.clearInterval(refreshTimer);
   }, [currentUser]);
 

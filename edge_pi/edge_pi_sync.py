@@ -17,6 +17,7 @@ import json
 # ---------------------------------------------------------------------------
 # CONFIGURATION (Per System Block Diagram)
 # ---------------------------------------------------------------------------
+VEHICLE_ID = os.environ.get("VEHICLE_ID", "V1")  # Survey Patrol Vehicle ID ('V1', 'V2', etc.)
 SQLITE_DB_PATH = "/home/pi/roadwatch/potholes.db"
 LOCAL_IMAGES_DIR = "/home/pi/roadwatch/images"
 
@@ -43,7 +44,6 @@ def init_local_db():
             lat REAL,
             lng REAL,
             severity TEXT,
-            depth_cm REAL,
             confidence REAL DEFAULT 0.88,
             peak_dev_g REAL DEFAULT 2.4,
             speed_kmh REAL DEFAULT 35.0,
@@ -59,14 +59,14 @@ def init_local_db():
 # ---------------------------------------------------------------------------
 # 2. SAVE DETECTED POTHOLE LOCALLY WHILE OFFLINE
 # ---------------------------------------------------------------------------
-def record_pothole_offline(pothole_id, road_name, ward, lat, lng, severity, depth_cm, image_path, confidence=0.88, shock_g=2.4, speed=35.0):
+def record_pothole_offline(pothole_id, road_name, ward, lat, lng, severity, image_path, confidence=0.88, shock_g=2.4, speed=35.0):
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT OR REPLACE INTO local_potholes 
-        (id, road_name, ward, lat, lng, severity, depth_cm, confidence, peak_dev_g, speed_kmh, local_image_path, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-    """, (pothole_id, road_name, ward, lat, lng, severity, depth_cm, confidence, shock_g, speed, image_path))
+        (id, road_name, ward, lat, lng, severity, confidence, peak_dev_g, speed_kmh, local_image_path, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    """, (pothole_id, road_name, ward, lat, lng, severity, confidence, shock_g, speed, image_path))
     conn.commit()
     conn.close()
     print(f"[OFFLINE SAVED] Pothole {pothole_id} buffered in SQLite queue. (Pending sync)")
@@ -93,7 +93,7 @@ def sync_to_cloud():
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, road_name, ward, lat, lng, severity, depth_cm, confidence, peak_dev_g, speed_kmh, local_image_path 
+        SELECT id, road_name, ward, lat, lng, severity, confidence, peak_dev_g, speed_kmh, local_image_path 
         FROM local_potholes WHERE synced = 0
     """)
     pending = cursor.fetchall()
@@ -105,16 +105,16 @@ def sync_to_cloud():
     print(f"[SYNC] Wi-Fi Online! Uploading {len(pending)} pending potholes to API Gateway...")
 
     for row in pending:
-        p_id, road_name, ward, lat, lng, severity, depth, conf, shock_g, speed, img_path = row
+        p_id, road_name, ward, lat, lng, severity, conf, shock_g, speed, img_path = row
 
         payload = {
             "id": p_id,
+            "vehicle_id": VEHICLE_ID,
             "road_name": road_name,
             "ward": ward,
             "lat": lat,
             "lng": lng,
             "severity": severity,
-            "depth_cm": depth,
             "confidence": conf,
             "peak_dev_g": shock_g,
             "speed_kmh": speed,

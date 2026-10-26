@@ -55,6 +55,9 @@ export default function PotholeModal({
   if (!pothole) return null;
 
   const isMnc = currentUser?.role === 'mnc';
+  const isCitizen = pothole.source === 'citizen' || 
+                    pothole.source === 'Citizen Report' || 
+                    (pothole.id && String(pothole.id).startsWith('RPT-'));
 
   let statusText = 'PENDING TENDER';
   let statusBadgeClass = 'badge-pending';
@@ -127,8 +130,17 @@ export default function PotholeModal({
                       <span>BEFORE (Defect Survey)</span>
                     </div>
                     <div className="photo-overlay-data">
-                      <div>YOLOv8 AI: <strong>{pothole.confidence}</strong></div>
-                      <div>IMU G-Force: <strong>{pothole.imuGForce} G</strong></div>
+                      {isCitizen ? (
+                        <>
+                          <div>Source: <strong>Citizen Report</strong></div>
+                          <div>Capture: <strong>Mobile Camera Photo</strong></div>
+                        </>
+                      ) : (
+                        <>
+                          <div>YOLOv8 AI: <strong>{pothole.confidence}</strong></div>
+                          <div>IMU G-Force: <strong>{pothole.imuGForce || 2.4} G</strong></div>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="photo-caption">
@@ -237,7 +249,16 @@ export default function PotholeModal({
                   display: 'block'
                 }}
               />
-              <div className="modal-img-badge">YOLOv8 AI Detection: {pothole.confidence || 'Detected'}</div>
+              <div 
+                className="modal-img-badge"
+                style={{
+                  background: isCitizen 
+                    ? 'linear-gradient(135deg, rgba(5, 150, 105, 0.95), rgba(16, 185, 129, 0.95))' 
+                    : undefined
+                }}
+              >
+                {isCitizen ? '📢 Public Citizen Report: Geotagged Photo' : `YOLOv8 AI Detection: ${pothole.confidence || 'Detected'}`}
+              </div>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setIsLightboxOpen(true); }}
@@ -295,14 +316,41 @@ export default function PotholeModal({
               <span className="lbl">Severity Level</span>
               <span className={`val text-${pothole.severity?.toLowerCase()}`}>{pothole.severity} RISK</span>
             </div>
-            <div className="detail-box">
-              <span className="lbl">IMU Shock Spike</span>
-              <span className="val">{pothole.imuGForce || 2.4} G</span>
-            </div>
-            <div className="detail-box">
-              <span className="lbl">Vehicle Survey Speed</span>
-              <span className="val">{pothole.speedKmh || 32} km/h</span>
-            </div>
+            {isCitizen ? (
+              <>
+                <div className="detail-box">
+                  <span className="lbl">Reporting Source</span>
+                  <span className="val" style={{ color: '#047857', fontWeight: 700 }}>
+                    📢 Public Citizen Grievance
+                  </span>
+                </div>
+                <div className="detail-box">
+                  <span className="lbl">Vehicle Survey Telemetry</span>
+                  <span className="val text-slate-500" style={{ fontSize: '12px' }}>
+                    N/A (Pedestrian / Mobile Camera)
+                  </span>
+                </div>
+                {(pothole.description || pothole.note) && (
+                  <div className="detail-box" style={{ gridColumn: 'span 2', backgroundColor: '#f8fafc', borderLeft: '3px solid #10b981' }}>
+                    <span className="lbl">Citizen Grievance Statement</span>
+                    <span className="val" style={{ fontSize: '13px', fontStyle: 'italic', color: '#1e293b' }}>
+                      "{pothole.description || pothole.note}"
+                    </span>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="detail-box">
+                  <span className="lbl">IMU Shock Spike</span>
+                  <span className="val">{pothole.imuGForce ? `${pothole.imuGForce} G` : '2.4 G'}</span>
+                </div>
+                <div className="detail-box">
+                  <span className="lbl">Vehicle Survey Speed</span>
+                  <span className="val">{pothole.speedKmh ? `${pothole.speedKmh} km/h` : '32 km/h'}</span>
+                </div>
+              </>
+            )}
             {pothole.status !== 'PENDING' && (
               <div className="detail-box">
                 <span className="lbl">{pothole.assignedVendor ? 'Awarded Value' : 'Tender Budget Cap'}</span>

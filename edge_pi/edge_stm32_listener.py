@@ -48,6 +48,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 # CONFIGURATION
 # ---------------------------------------------------------------------------
+VEHICLE_ID = os.environ.get("VEHICLE_ID", "V1")  # Survey Patrol Vehicle ID ('V1', 'V2', etc.)
 SERIAL_PORT = "/dev/serial0"    # Hardware UART (GPIO 14 TX, GPIO 15 RX)
 BAUD_RATE = 115200              # Matches STM32 USART2 baud rate
 SQLITE_DB_PATH = "/home/pi/roadwatch/potholes.db"
@@ -71,7 +72,6 @@ def init_db():
             lat REAL,
             lng REAL,
             severity TEXT,
-            depth_cm REAL,
             confidence REAL DEFAULT 0.88,
             peak_dev_g REAL DEFAULT 2.4,
             speed_kmh REAL DEFAULT 35.0,
@@ -83,14 +83,14 @@ def init_db():
     conn.commit()
     conn.close()
 
-def record_pothole_offline(p_id, road_name, ward, lat, lng, severity, depth_cm, conf, shock_g, speed, img_path, is_synced=0):
+def record_pothole_offline(p_id, road_name, ward, lat, lng, severity, conf, shock_g, speed, img_path, is_synced=0):
     conn = sqlite3.connect(SQLITE_DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         INSERT OR REPLACE INTO local_potholes 
-        (id, road_name, ward, lat, lng, severity, depth_cm, confidence, peak_dev_g, speed_kmh, local_image_path, synced)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (p_id, road_name, ward, lat, lng, severity, depth_cm, conf, shock_g, speed, img_path, is_synced))
+        (id, road_name, ward, lat, lng, severity, confidence, peak_dev_g, speed_kmh, local_image_path, synced)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (p_id, road_name, ward, lat, lng, severity, conf, shock_g, speed, img_path, is_synced))
     conn.commit()
     conn.close()
 
@@ -143,14 +143,19 @@ def run_yolo_inference(image_path, shock_g):
     conf = min(0.96, 0.70 + (shock_g / 10.0))
     return round(conf, 2)
 
-def calculate_severity(shock_g):
-    if shock_g >= 3.0:
-        return "CRITICAL", 12.5
-    elif shock_g >= 2.2:
-        return "HIGH", 8.0
-    elif shock_g >= 1.8:
-        return "MEDIUM", 5.5
-    return "LOW", 3.0
+def calculate_severity_from_confidence(conf):
+    """
+    Severity is directly determined by AI Confidence (0.0 - 1.0 or 0 - 100%)
+    - Confidence >= 0.80 (80%) -> HIGH
+    - Confidence >= 0.50 (50%) -> MEDIUM
+    - Confidence < 0.50  (<50%) -> LOW
+    """
+    c = conf / 100.0 if conf > 1.0 else conf
+    if c >= 0.80:
+        return "HIGH"
+    elif c >= 0.50:
+        return "MEDIUM"
+    return "LOW"
 
 # ---------------------------------------------------------------------------
 # 4. NETWORK CONNECTIVITY & IMMEDIATE SYNC
@@ -162,19 +167,21 @@ def is_online():
     except OSError:
         return False
 
-def upload_to_gateway(p_id, road, ward, lat, lng, severity, depth, conf, shock_g, speed, img_path):
+def upload_to_gateway(p_id, road, ward, lat, lng, confidence, shock_g, speed, img_path):
     if not is_online() or requests is None:
         return False
 
+    severity = calculate_severity_from_confidence(confidence)
+
     payload = {
         "id": p_id,
+        "vehicle_id": VEHICLE_ID,
         "road_name": road,
         "ward": ward,
         "lat": lat,
         "lng": lng,
+        "confidence": confidence,
         "severity": severity,
-        "depth_cm": depth,
-        "confidence": conf,
         "peak_dev_g": shock_g,
         "speed_kmh": speed,
         "source": "edge_pi"
@@ -190,7 +197,7 @@ def upload_to_gateway(p_id, road, ward, lat, lng, severity, depth, conf, shock_g
             files['photo'][1].close()
 
         if res.status_code in [200, 201]:
-            print(f"[CLOUD UPLOAD SUCCESS] Pothole {p_id} transmitted immediately via API Gateway!")
+            print(f"[CLOUD UPLOAD SUCCESS] Pothole {p_id} ({severity}) transmitted immediately via API Gateway!")
             return True
         else:
             print(f"[UPLOAD REJECTED] Status {res.status_code}")
@@ -202,35 +209,47 @@ def upload_to_gateway(p_id, road, ward, lat, lng, severity, depth, conf, shock_g
 # ---------------------------------------------------------------------------
 # 5. SERIAL TELEMETRY LISTENER & SENSOR FUSION DISPATCH
 # ---------------------------------------------------------------------------
+_last_telemetry_time = 0
+
 def process_telemetry(data):
+    global _last_telemetry_time
+    now = time.time()
+    # Debounce guard: Prevent Pi 3B+ from choking on consecutive shock vibrations of the same pothole
+    if now - _last_telemetry_time < 1.2:
+        return
+    _last_telemetry_time = now
+
     p_id = data.get("id", f"RW-NGP-{int(time.time()) % 10000}")
     lat = float(data.get("lat", 21.1458))
     lng = float(data.get("lng", 79.0882))
     shock = float(data.get("shock_g", 2.2))
     speed = float(data.get("speed", 35.0))
 
-    severity, depth_cm = calculate_severity(shock)
     print(f"\n⚡ [STM32 TRIGGER] Shock: {shock:.2f}G | GPS: ({lat:.5f}, {lng:.5f}) | Speed: {speed:.1f} km/h")
 
     # Step A: Capture image from OV5647 CSI camera
     img_path = capture_snapshot(p_id)
 
-    # Step B: Run YOLOv8 Pothole Detection
+    # Step B: Run YOLOv8 Pothole Detection -> Calculates AI Confidence (0.0 - 1.0)
     confidence = run_yolo_inference(img_path, shock)
+    severity = calculate_severity_from_confidence(confidence)
+    print(f"📊 [AI VISION] Confidence: {confidence*100:.1f}% -> Severity: {severity}")
 
-    # Step C: Check Wi-Fi -> Upload to API Gateway (Cloud backend handles Reverse Geocoding)
-    uploaded = upload_to_gateway(p_id, None, None, lat, lng, severity, depth_cm, confidence, shock, speed, img_path)
+    # Step C: Check Wi-Fi -> Upload to API Gateway (Cloud backend handles Reverse Geocoding & Depth Estimation)
+    uploaded = upload_to_gateway(p_id, None, None, lat, lng, confidence, shock, speed, img_path)
 
     # Step D: Save to local SQLite (marked synced=1 if uploaded, else synced=0 for retry)
-    record_pothole_offline(p_id, "Surveyed Corridor", "Central Zone", lat, lng, severity, depth_cm, confidence, shock, speed, img_path, is_synced=1 if uploaded else 0)
+    record_pothole_offline(p_id, "Surveyed Corridor", "Central Zone", lat, lng, severity, confidence, shock, speed, img_path, is_synced=1 if uploaded else 0)
 
 def listen_stm32():
     init_db()
     print("=================================================================")
     print(" 🛣️ RoadWatch AI — Edge Detection Unit (Raspberry Pi 3B+)")
-    print(f" Camera: OV5647 via CSI Ribbon Bus")
+    print(f" Assigned Vehicle ID: {VEHICLE_ID}")
+    print(f" Camera: OV5647 via CSI Ribbon Bus (Lightweight Trigger Mode)")
     print(f" Serial Port: {SERIAL_PORT} @ {BAUD_RATE} Baud (STM32 USART2)")
     print(f" Cloud Gateway: {API_GATEWAY_URL}")
+    print(" Architecture: Interrupt-Driven Telemetry (Ultra-low Pi 3B+ CPU load)")
     print("=================================================================")
 
     if serial is None or MOCK_SERIAL:
@@ -239,6 +258,7 @@ def listen_stm32():
             time.sleep(12)
             mock_payload = {
                 "id": f"RW-NGP-{int(time.time()) % 10000}",
+                "vehicle_id": VEHICLE_ID,
                 "road": "Wardha Road (NH-44)",
                 "ward": "Ward 4 Dharampeth",
                 "lat": 21.1215,
@@ -267,6 +287,9 @@ def listen_stm32():
                         process_telemetry(data)
                     except json.JSONDecodeError:
                         pass
+            else:
+                # Crucial for Pi 3B+: Yield CPU core when idle to prevent 100% spin loop
+                time.sleep(0.015)
         except KeyboardInterrupt:
             print("\n[STOPPING] Shutting down listener.")
             break

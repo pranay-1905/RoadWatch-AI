@@ -12,6 +12,7 @@ const router = express.Router();
 
 // Edge sync endpoint (Raspberry Pi 3B+ connects here via Wi-Fi)
 router.post('/sync', upload.single('photo'), syncEdgeBatch);
+router.post('/sync-edge', upload.single('photo'), syncEdgeBatch);
 
 // Read potholes & filtering
 router.get('/', getAllPotholes);

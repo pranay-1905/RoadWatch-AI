@@ -30,6 +30,37 @@ const reverseGeocode = async (lat, lng) => {
 };
 
 /**
+ * Helper: Sequential Vehicle ID Generator (RW-V1-1001, RW-V1-1002, etc.)
+ */
+const getNextVehiclePotholeId = async (vehicleId = 'V1') => {
+  try {
+    const vUpper = (vehicleId || 'V1').toUpperCase();
+    const prefix = `RW-${vUpper}-`;
+    const { data } = await supabase
+      .from('potholes')
+      .select('id')
+      .ilike('id', `${prefix}%`)
+      .order('event_time', { ascending: false, nullsFirst: false })
+      .limit(50);
+
+    let maxNum = 1000;
+    if (data && data.length > 0) {
+      data.forEach(row => {
+        if (!row.id) return;
+        const parts = row.id.split('-');
+        const num = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(num) && num > maxNum) {
+          maxNum = num;
+        }
+      });
+    }
+    return maxNum + 1;
+  } catch {
+    return 1001;
+  }
+};
+
+/**
  * 1. SYNC EDGE BATCH (Called by Raspberry Pi 3B+ when connecting to Wi-Fi)
  */
 export const syncEdgeBatch = async (req, res, next) => {
@@ -55,8 +86,16 @@ export const syncEdgeBatch = async (req, res, next) => {
       }
     }
 
+    // Determine Vehicle ID and get sequential starting counter
+    const defaultVehicle = payload.vehicle_id || payload.vehicleId || 'V1';
+    let currentSeq = await getNextVehiclePotholeId(defaultVehicle);
+
     // Resolve real road names from GPS coordinates (Reverse Geocoding)
-    const sanitized = await Promise.all(potholesToInsert.map(async (item) => {
+    const sanitized = await Promise.all(potholesToInsert.map(async (item, idx) => {
+      const vId = (item.vehicle_id || item.vehicleId || defaultVehicle).toUpperCase();
+      const generatedId = `RW-${vId}-${currentSeq + idx}`;
+      const finalId = item.id && (item.id.startsWith('RW-') || item.id.startsWith('RPT-')) ? item.id : generatedId;
+
       const lat = parseFloat(item.lat);
       const lng = parseFloat(item.lng ?? item.lon);
       let road_name = item.road_name || item.note;
@@ -73,34 +112,43 @@ export const syncEdgeBatch = async (req, res, next) => {
         }
       }
 
-      const scoreVal = item.confidence !== undefined ? parseFloat(item.confidence) : (item.score !== undefined ? parseFloat(item.score) : null);
+      const scoreVal = item.score !== undefined ? parseFloat(item.score) : (item.confidence !== undefined ? parseFloat(item.confidence) : (item.severity_score !== undefined ? parseFloat(item.severity_score) : null));
       const peakGVal = item.peak_dev_g !== undefined ? parseFloat(item.peak_dev_g) : (item.peak_mg !== undefined ? parseFloat((item.peak_mg / 1000).toFixed(2)) : (item.imuGForce ? parseFloat(item.imuGForce) : null));
 
+      // Severity is directly determined by AI Confidence / Score (0.0 - 1.0 or 0 - 100)
+      let rawSev = (item.severity || '').toString().trim().toUpperCase();
+      let normalizedSeverity = 'MEDIUM';
+      if (scoreVal !== null && !isNaN(scoreVal)) {
+        const c = scoreVal > 1 ? scoreVal / 100 : scoreVal;
+        if (c >= 0.80) normalizedSeverity = 'HIGH';
+        else if (c >= 0.50) normalizedSeverity = 'MEDIUM';
+        else normalizedSeverity = 'LOW';
+      } else if (rawSev === 'CRITICAL' || rawSev === 'HIGH' || rawSev === 'MEDIUM' || rawSev === 'LOW') {
+        normalizedSeverity = rawSev === 'NORMAL' ? 'LOW' : rawSev;
+      } else if (peakGVal) {
+        normalizedSeverity = peakGVal >= 3.0 ? 'CRITICAL' : (peakGVal >= 2.2 ? 'HIGH' : (peakGVal >= 1.8 ? 'MEDIUM' : 'LOW'));
+      }
+
       return {
-        id: item.id || `NMC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: finalId,
         road_name: road_name || 'Nagpur Arterial Road',
         ward: ward || 'Central Zone',
         lat,
         lng,
         lon: lng,
-        severity: (item.severity || (peakGVal && peakGVal > 3.0 ? 'CRITICAL' : 'MEDIUM')).toUpperCase(),
-        depth_cm: parseFloat(item.depth_cm || 5.0),
+        severity: normalizedSeverity,
         status: item.status || 'OPEN',
         image_url: item.image_url || null,
         sla_hours: item.severity === 'CRITICAL' ? 24 : item.severity === 'HIGH' ? 48 : 72,
         source: item.source || 'edge_pi',
-        detected_at: item.event_time || item.detected_at || new Date().toISOString(),
+        event_time: item.date_time || item.datetime || item.event_time || item.timestamp || new Date().toISOString(),
         confidence: scoreVal,
-        score: scoreVal,
         peak_dev_g: peakGVal,
         peak_mg: item.peak_mg !== undefined ? parseFloat(item.peak_mg) : (peakGVal ? peakGVal * 1000 : null),
-        ax_mg: item.ax_mg !== undefined ? parseInt(item.ax_mg, 10) : (item.ax !== undefined ? parseInt(item.ax, 10) : null),
-        ay_mg: item.ay_mg !== undefined ? parseInt(item.ay_mg, 10) : (item.ay !== undefined ? parseInt(item.ay, 10) : null),
-        az_mg: item.az_mg !== undefined ? parseInt(item.az_mg, 10) : (item.az !== undefined ? parseInt(item.az, 10) : null),
         gx_dps: item.gx_dps !== undefined ? parseFloat(item.gx_dps) : null,
         gy_dps: item.gy_dps !== undefined ? parseFloat(item.gy_dps) : null,
         gz_dps: item.gz_dps !== undefined ? parseFloat(item.gz_dps) : null,
-        speed_kmh: item.speed_kmh !== undefined ? parseFloat(item.speed_kmh) : (item.speedKmh ? parseFloat(item.speedKmh) : null),
+        speed_kmh: item.speed_kmh !== undefined ? parseFloat(item.speed_kmh) : (item.speed !== undefined ? parseFloat(item.speed) : (item.speedKmh ? parseFloat(item.speedKmh) : null)),
         note: item.note || null
       };
     }));
@@ -129,7 +177,7 @@ export const syncEdgeBatch = async (req, res, next) => {
 export const getAllPotholes = async (req, res, next) => {
   try {
     const { ward, severity, status } = req.query;
-    let query = supabase.from('potholes').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('potholes').select('*').order('event_time', { ascending: false, nullsFirst: false });
 
     if (ward) query = query.eq('ward', ward);
     if (severity) query = query.eq('severity', severity.toUpperCase());
@@ -177,23 +225,47 @@ export const updatePotholeStatus = async (req, res, next) => {
     const { id } = req.params;
     const { status, resolved_at } = req.body;
 
-    const updates = { status: status.toUpperCase() };
-    if (status.toUpperCase() === 'RESOLVED') {
+    const normalizedStatus = status.toUpperCase();
+    const updates = { status: normalizedStatus };
+    if (normalizedStatus === 'RESOLVED') {
       updates.resolved_at = resolved_at || new Date().toISOString();
     }
 
-    const { data, error } = await supabase
+    // 1. Try updating potholes table
+    let { data, error } = await supabase
       .from('potholes')
       .update(updates)
       .eq('id', id)
       .select();
 
+    // 2. If no record was updated in potholes table, check citizen_reports table!
+    if (!data || data.length === 0) {
+      let citizenStatus = normalizedStatus;
+      if (citizenStatus === 'PENDING') citizenStatus = 'VERIFIED';
+      if (citizenStatus === 'OPEN') citizenStatus = 'REPORTED';
+      if (citizenStatus === 'IN_PROGRESS') citizenStatus = 'IN_REPAIR';
+
+      const citizenUpdates = { status: citizenStatus };
+      if (citizenStatus === 'RESOLVED') {
+        citizenUpdates.resolved_at = resolved_at || new Date().toISOString();
+      }
+
+      const { data: citizenData, error: citizenError } = await supabase
+        .from('citizen_reports')
+        .update(citizenUpdates)
+        .eq('tracking_id', id.toUpperCase())
+        .select();
+
+      if (citizenError) throw citizenError;
+      data = citizenData;
+    }
+
     if (error) throw error;
 
     res.json({
       success: true,
-      message: `Pothole ${id} updated to ${status}`,
-      data: data[0]
+      message: `Record ${id} updated to ${status}`,
+      data: data && data.length > 0 ? data[0] : null
     });
   } catch (error) {
     next(error);

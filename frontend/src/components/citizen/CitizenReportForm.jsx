@@ -207,12 +207,28 @@ export default function CitizenReportForm({ onBack }) {
 
   const renderTimeline = (report) => {
     const formattedDate = safeFormatDate(report?.reportedAt);
+    const rawStatus = String(report?.status || '').toUpperCase();
+    
+    // Calculate step index (0 to 4) dynamically
+    let stepIdx = 0;
+    if (typeof report?.currentStepIndex === 'number') {
+      stepIdx = report.currentStepIndex;
+    } else if (rawStatus === 'RESOLVED' || rawStatus === 'COMPLETED') {
+      stepIdx = 4;
+    } else if (rawStatus === 'IN_REPAIR' || rawStatus === 'IN_PROGRESS') {
+      stepIdx = 3;
+    } else if (rawStatus === 'TENDER_ISSUED' || rawStatus.includes('TENDER')) {
+      stepIdx = 2;
+    } else if (rawStatus === 'VERIFIED' || rawStatus === 'PENDING') {
+      stepIdx = 1;
+    }
+
     const steps = [
-      { id: 1, title: 'Complaint Registered', desc: 'Geotagged citizen report logged', done: true, time: formattedDate },
-      { id: 2, title: 'Municipal Inspection', desc: 'MNC Civil Engineer site review', done: true, time: 'In Progress' },
-      { id: 3, title: 'Tender Dispatched', desc: 'Assigned to empanelled contractor', done: report?.status === 'Tender Issued' || report?.status === 'Resolved', time: 'Pending' },
-      { id: 4, title: 'Asphalt Compaction', desc: 'Heavy roller road resurfacing', done: report?.status === 'Resolved', time: 'Scheduled' },
-      { id: 5, title: 'Audit & Resolved', desc: 'Geotagged proof verified by MNC', done: report?.status === 'Resolved', time: 'Final Step' },
+      { id: 1, title: 'Complaint Registered', desc: 'Geotagged grievance logged in Municipal Registry', done: stepIdx >= 0, time: formattedDate },
+      { id: 2, title: 'Municipal Inspection', desc: 'MNC Civil Engineer site review & audit', done: stepIdx >= 1, time: stepIdx >= 1 ? 'Verified' : 'Under Inspection' },
+      { id: 3, title: 'Tender Dispatched', desc: 'Work order assigned to empanelled PWD contractor', done: stepIdx >= 2, time: stepIdx >= 2 ? 'Tender Issued' : 'Pending' },
+      { id: 4, title: 'Asphalt Compaction', desc: 'Heavy roller road resurfacing & hot-mix asphalt in progress', done: stepIdx >= 3, time: stepIdx >= 3 ? (stepIdx >= 4 ? 'Completed' : 'In Progress') : 'Scheduled' },
+      { id: 5, title: 'Audit & Resolved', desc: 'Geotagged proof verified by municipal auditor', done: stepIdx >= 4, time: stepIdx >= 4 ? 'Resolved' : 'Final Step' },
     ];
 
     return (
