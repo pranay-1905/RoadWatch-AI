@@ -172,5 +172,18 @@ export const roadWatchApi = {
     } catch (err) {
       return { data: null, error: err };
     }
+  },
+
+  // 10. Delete Pothole by ID (from Supabase Database)
+  async deletePothole(potholeId) {
+    try {
+      const res = await fetch(`${API_BASE}/potholes/${potholeId}`, {
+        method: 'DELETE'
+      });
+      const json = await res.json();
+      return { data: json, error: null };
+    } catch (err) {
+      return { data: null, error: err };
+    }
   }
 };

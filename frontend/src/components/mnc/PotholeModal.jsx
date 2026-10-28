@@ -11,7 +11,8 @@ import {
   Camera, 
   Award, 
   RotateCcw,
-  Maximize2
+  Maximize2,
+  Trash2
 } from 'lucide-react';
 
 const parseDate = (ts) => {
@@ -43,6 +44,7 @@ export default function PotholeModal({
   onAcceptBid,
   onApproveWork,
   onRequestRework,
+  onDeletePothole,
   currentUser 
 }) {
   const [reworkReason, setReworkReason] = useState('');
@@ -586,8 +588,32 @@ export default function PotholeModal({
         </div>
 
         {/* MODAL FOOTER */}
-        <div className="modal-footer">
-          <button className="btn btn-secondary" onClick={onClose}>Close Dossier</button>
+        <div className="modal-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button className="btn btn-secondary" onClick={onClose}>Close Dossier</button>
+            {isMnc && onDeletePothole && (
+              <button 
+                type="button"
+                className="btn btn-outline-danger" 
+                style={{ 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  gap: '6px', 
+                  color: '#ef4444', 
+                  borderColor: '#ef444433',
+                  background: 'rgba(239, 68, 68, 0.08)' 
+                }}
+                onClick={() => {
+                  if (window.confirm(`Are you sure you want to delete incident #${pothole.id}? This will remove it from the database and decrease the total pothole count.`)) {
+                    onDeletePothole(pothole.id);
+                    onClose();
+                  }
+                }}
+              >
+                <Trash2 className="w-4 h-4" /> Delete Incident
+              </button>
+            )}
+          </div>
           
           {/* Direct actions in footer for active states */}
 

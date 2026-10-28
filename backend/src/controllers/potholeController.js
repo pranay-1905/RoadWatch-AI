@@ -349,3 +349,40 @@ export const uploadRepairEvidence = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Delete a pothole defect record by ID
+ */
+export const deletePothole = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Pothole ID is required' });
+    }
+
+    const { data, error } = await supabase
+      .from('potholes')
+      .delete()
+      .eq('id', id)
+      .select();
+
+    if (error) {
+      console.warn('[DB DELETE ERROR]', error.message);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    // Also attempt cleanup if it was a citizen report
+    if (String(id).startsWith('RPT-')) {
+      await supabase.from('citizen_reports').delete().eq('tracking_id', id);
+    }
+
+    res.json({
+      success: true,
+      message: `Pothole ${id} deleted successfully.`,
+      deleted: data
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+

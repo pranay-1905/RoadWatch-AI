@@ -85,12 +85,18 @@ export default function App() {
         imuGForce: null
       }));
       setPotholes((current) => {
+        // Keep non-citizen items
+        const nonCitizenItems = current.filter(
+          item => !String(item.id).startsWith('RPT-') && item.source !== 'Citizen Report'
+        );
+
+        // Merge existing local metadata for active reports
         const mergedReports = reports.map((r) => {
-          const existing = current.find((c) => c.id === r.id);
+          const existing = current.find((c) => c && c.id === r.id);
           if (existing) {
             return {
               ...r,
-              status: existing.status,
+              status: existing.status || r.status,
               estimatedCost: existing.estimatedCost,
               bids: existing.bids || [],
               assignedVendor: existing.assignedVendor
@@ -98,8 +104,8 @@ export default function App() {
           }
           return r;
         });
-        const reportIds = new Set(mergedReports.map(r => r.id));
-        return [...current.filter((item) => !reportIds.has(item.id)), ...mergedReports];
+
+        return [...nonCitizenItems, ...mergedReports];
       });
     }
   };
@@ -134,18 +140,30 @@ export default function App() {
         };
       });
 
+      const backendIdSet = new Set(backendItems.map(b => b.id));
+
       setPotholes((current) => {
-        const currentMap = new Map();
-        current.forEach(p => {
-          if (p && p.id) currentMap.set(p.id, p);
+        // 1. Map backend items, preserving any local transient edits (like bids or status)
+        const updatedBackend = backendItems.map((b) => {
+          const existing = current.find(c => c && c.id === b.id);
+          return existing ? { ...b, ...existing, status: existing.status || b.status } : b;
         });
-        backendItems.forEach(b => {
-          if (b && b.id) {
-            const existing = currentMap.get(b.id);
-            currentMap.set(b.id, existing ? { ...b, ...existing, status: existing.status || b.status } : b);
+
+        // 2. Retain items that are NOT backend potholes (like Citizen Reports or initial demo POT- mock items)
+        // If an item was a vehicle survey pothole (RW-* or source === 'edge_pi') but is NOT in backendIdSet,
+        // it means IT WAS DELETED FROM THE DATABASE, so drop it!
+        const nonBackendItems = current.filter(c => {
+          if (!c || !c.id) return false;
+          if (backendIdSet.has(c.id)) return false; // already in updatedBackend
+          const isEdgeSurveyItem = String(c.id).startsWith('RW-') || c.source === 'edge_pi';
+          if (isEdgeSurveyItem) {
+            // Deleted from database -> drop it!
+            return false;
           }
+          return true; // Keep citizen report or mock demo item
         });
-        return Array.from(currentMap.values());
+
+        return [...nonBackendItems, ...updatedBackend];
       });
     }
   };
@@ -405,6 +423,21 @@ export default function App() {
     }
   };
 
+  // Handle Action: Delete Pothole / Incident Record (MNC)
+  const handleDeletePothole = async (potholeId) => {
+    // 1. Optimistically remove from state & update localStorage immediately
+    setPotholes(prev => prev.filter(item => item.id !== potholeId));
+    if (selectedPothole && selectedPothole.id === potholeId) {
+      setSelectedPothole(null);
+    }
+    // 2. Call backend DELETE endpoint to remove from database table
+    try {
+      await roadWatchApi.deletePothole(potholeId);
+    } catch (err) {
+      console.warn('Backend delete sync warning:', err);
+    }
+  };
+
   // If user is not logged in, render the AuthScreen
   if (!currentUser) {
     return <AuthScreen onLogin={handleLogin} usersList={usersList} />;
@@ -545,6 +578,7 @@ export default function App() {
           onApproveWork={handleMncApproveWork}
           onRequestRework={handleMncRequestRework}
           onAcceptBid={handleAcceptBid}
+          onDeletePothole={handleDeletePothole}
         />
       )}
 

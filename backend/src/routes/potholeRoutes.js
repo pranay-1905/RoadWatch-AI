@@ -4,7 +4,8 @@ import {
   getPotholeById, 
   syncEdgeBatch, 
   updatePotholeStatus,
-  uploadRepairEvidence 
+  uploadRepairEvidence,
+  deletePothole 
 } from '../controllers/potholeController.js';
 import { upload } from '../config/multer.js';
 
@@ -20,6 +21,9 @@ router.get('/:id', getPotholeById);
 
 // Update status
 router.patch('/:id/status', updatePotholeStatus);
+
+// Delete pothole
+router.delete('/:id', deletePothole);
 
 // Contractor repair proof upload
 router.post('/:id/verify-repair', upload.single('photo'), uploadRepairEvidence);
