@@ -94,7 +94,8 @@ export const syncEdgeBatch = async (req, res, next) => {
     const sanitized = await Promise.all(potholesToInsert.map(async (item, idx) => {
       const vId = (item.vehicle_id || item.vehicleId || defaultVehicle).toUpperCase();
       const generatedId = `RW-${vId}-${currentSeq + idx}`;
-      const finalId = item.id && (item.id.startsWith('RW-') || item.id.startsWith('RPT-')) ? item.id : generatedId;
+      const isVehicleSequential = item.id && /^RW-V\d+-\d+$/i.test(item.id);
+      const finalId = isVehicleSequential || (item.id && item.id.startsWith('RPT-')) ? item.id : generatedId;
 
       const lat = parseFloat(item.lat);
       const lng = parseFloat(item.lng ?? item.lon);

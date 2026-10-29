@@ -18,7 +18,19 @@ export default function IncidentFeed({ data, onSelectPothole }) {
             const severity = String(item.severity || 'MEDIUM');
             const statusText = item.status === 'PENDING' ? 'Pending' : (item.status === 'TENDER_ISSUED' ? 'Tender Sent' : 'Work Done');
             const timestamp = item.timestamp || item.reportedAt || item.created_at || '';
-            const timeText = timestamp.includes(' ') ? timestamp.split(' ')[1] : timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--';
+            let timeText = '--';
+            if (timestamp) {
+              if (typeof timestamp === 'string' && timestamp.includes(' ') && timestamp.split(' ')[1]) {
+                timeText = timestamp.split(' ')[1].slice(0, 5);
+              } else {
+                try {
+                  const d = new Date(timestamp);
+                  if (!isNaN(d.getTime())) {
+                    timeText = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  }
+                } catch {}
+              }
+            }
             const location = item.locationName || item.location || item.ward || item.roadName || 'Location pending';
             return (
               <div

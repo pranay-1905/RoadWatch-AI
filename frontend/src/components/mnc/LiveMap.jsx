@@ -87,7 +87,7 @@ export default function LiveMap({ data, onSelectPothole, standalone = false }) {
       mGroup.clearLayers();
 
       (data || []).forEach(item => {
-        if (!item || typeof item.lat !== 'number' || typeof item.lng !== 'number') return;
+        if (!item || typeof item.lat !== 'number' || typeof item.lng !== 'number' || isNaN(item.lat) || isNaN(item.lng) || (item.lat === 0 && item.lng === 0)) return;
         let pinColor = item.status === 'WORK_DONE' ? '#2563eb' : (item.severity === 'HIGH' ? '#dc2626' : (item.severity === 'MEDIUM' ? '#d97706' : '#059669'));
 
         const icon = L.divIcon({
