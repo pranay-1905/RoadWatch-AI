@@ -2,11 +2,31 @@ import { supabase } from '../config/db.js';
 import { uploadToSupabaseStorage } from '../config/multer.js';
 
 /**
+ * Fallback Location: Priyadarshini College of Engineering (PCE Nagpur)
+ * Used whenever the physical GPS sensor is off, disconnected, or has no satellite fix.
+ */
+export const PCE_NAGPUR = {
+  lat: 21.1011,
+  lng: 79.0070,
+  roadName: 'Priyadarshini College of Engineering (PCE), Hingna Road',
+  ward: 'Digdoh Hills (PCE Campus)'
+};
+
+/**
  * Helper: Automated Reverse Geocoding (Converts lat, lng to real road & ward name via OpenStreetMap)
  */
 const reverseGeocode = async (lat, lng) => {
   try {
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return null;
+
+    // Fast-path: If coordinates are at PCE Nagpur campus, return college details directly
+    if (Math.abs(lat - PCE_NAGPUR.lat) < 0.005 && Math.abs(lng - PCE_NAGPUR.lng) < 0.005) {
+      return {
+        roadName: PCE_NAGPUR.roadName,
+        ward: PCE_NAGPUR.ward
+      };
+    }
+
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
     const res = await fetch(url, {
       headers: {
@@ -97,19 +117,32 @@ export const syncEdgeBatch = async (req, res, next) => {
       const isVehicleSequential = item.id && /^RW-V\d+-\d+$/i.test(item.id);
       const finalId = isVehicleSequential || (item.id && item.id.startsWith('RPT-')) ? item.id : generatedId;
 
-      const lat = parseFloat(item.lat);
-      const lng = parseFloat(item.lng ?? item.lon);
+      let lat = parseFloat(item.lat);
+      let lng = parseFloat(item.lng ?? item.lon);
       let road_name = item.road_name || item.note;
       let ward = item.ward;
 
-      // If road_name is generic or empty, convert lat/lng to real street address
-      if (!road_name || road_name === 'Nagpur Arterial Road' || road_name === 'West High Court Road') {
-        const geo = await reverseGeocode(lat, lng);
-        if (geo) {
-          road_name = geo.roadName;
-          ward = geo.ward || ward;
-        } else {
-          road_name = item.note || `Surveyed Road Corridor (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+      // Check if GPS sensor is NOT working (empty, 0, NaN, or old un-synced default)
+      const isSensorNotWorking = !lat || !lng || isNaN(lat) || isNaN(lng) || 
+                                (lat === 0 && lng === 0) || 
+                                (Math.abs(lat - 21.1458) < 0.001 && Math.abs(lng - 79.0882) < 0.001);
+
+      if (isSensorNotWorking) {
+        // Sensor NOT working: Fallback to Priyadarshini College of Engineering (PCE)
+        lat = 21.1011;
+        lng = 79.0070;
+        road_name = road_name || 'Priyadarshini College of Engineering, Hingna Road';
+        ward = ward || 'Digdoh Hills';
+      } else {
+        // Sensor IS WORKING: Use the exact GPS values given by the sensor
+        if (!road_name || road_name === 'Nagpur Arterial Road' || road_name === 'West High Court Road' || road_name.includes('Surveyed Road Corridor')) {
+          const geo = await reverseGeocode(lat, lng);
+          if (geo) {
+            road_name = geo.roadName;
+            ward = geo.ward || ward;
+          } else {
+            road_name = item.note || `Surveyed Road Corridor (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+          }
         }
       }
 
@@ -132,8 +165,8 @@ export const syncEdgeBatch = async (req, res, next) => {
 
       return {
         id: finalId,
-        road_name: road_name || 'Nagpur Arterial Road',
-        ward: ward || 'Central Zone',
+        road_name: road_name || (isSensorNotWorking ? 'Priyadarshini College of Engineering, Hingna Road' : 'Surveyed Road Corridor'),
+        ward: ward || (isSensorNotWorking ? 'Digdoh Hills' : 'Central Zone'),
         lat,
         lng,
         lon: lng,
@@ -325,10 +358,10 @@ export const uploadRepairEvidence = async (req, res, next) => {
         .from('potholes')
         .upsert([{
           id,
-          road_name: req.body.road_name || 'Nagpur Monitored Road',
-          ward: req.body.ward || 'Central Zone',
-          lat: parseFloat(req.body.lat) || 21.1458,
-          lng: parseFloat(req.body.lng) || 79.0882,
+          road_name: req.body.road_name || PCE_NAGPUR.roadName,
+          ward: req.body.ward || PCE_NAGPUR.ward,
+          lat: parseFloat(req.body.lat) || PCE_NAGPUR.lat,
+          lng: parseFloat(req.body.lng) || PCE_NAGPUR.lng,
           severity: 'MEDIUM',
           status: 'RESOLVED',
           repair_image_url: photoUrl,
